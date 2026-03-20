@@ -13,6 +13,9 @@ langchain-openai
 langchain-core
 langchain
 
+# LlamaParse (官方文档解析)
+llama-parse            # LlamaCloud 文档解析服务
+
 # 文件转换依赖
 pymupdf4llm          # PDF 转 Markdown (推荐)
 PyMuPDF              # PDF 处理基础库
