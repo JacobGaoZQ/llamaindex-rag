@@ -4,3 +4,21 @@ autopep8
 
 # App
 flask
+
+# LlamaIndex & LangChain
+llama-index-core
+llama-index-llms-dashscope
+llama-index-embeddings-dashscope
+langchain-openai
+langchain-core
+langchain
+
+# 文件转换依赖
+pymupdf4llm          # PDF 转 Markdown (推荐)
+PyMuPDF              # PDF 处理基础库
+mammoth              # Word(docx) 转 Markdown
+python-docx          # Word 备选方案
+pandas               # Excel/CSV 处理
+openpyxl             # Excel 读取
+python-pptx          # PowerPoint 处理
+html2text            # HTML 转 Markdown
