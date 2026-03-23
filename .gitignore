@@ -2,3 +2,11 @@
 __pycache__/
 *.pyc
 .env
+
+# 多模态 RAG 生成的目录
+extracted_images/
+parsed_metadata/
+multimodal_index/
+
+# Streamlit
+.streamlit/

@@ -4,6 +4,7 @@ autopep8
 
 # App
 flask
+streamlit              # Web UI 框架
 
 # LlamaIndex & LangChain
 llama-index-core
