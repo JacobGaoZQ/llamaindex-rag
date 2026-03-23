@@ -14,7 +14,7 @@ import os
 print("正在加载文档并构建 LlamaIndex 知识库...")
 # 假设你的当前目录下有一个 "data" 文件夹存放了文本文档或 PDF
 # 设置 API Key (从环境变量读取)
-QWEN_API_KEY = os.environ.get("QWEN_API_KEY")
+QWEN_API_KEY = "xxxxxx"  # 请替换为你的 API Key 或使用环境变量
 QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL = "qwen-flash"
 
