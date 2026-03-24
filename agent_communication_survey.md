@@ -407,6 +407,12 @@ Real-time updates and notifications
 - 灵活的消息路由机制
 - 内置错误处理和恢复机制
 
+**通信方式**:
+- **LangGraph**: 基于图的状态机，Agent通过边（edges）传递消息
+- **消息传递**: 使用`MessagesState`维护对话历史
+- **工具调用**: Agent通过工具调用间接通信（如`forward_message`工具）
+- **共享状态**: 通过图节点状态共享上下文信息
+
 ### 5.2 LlamaIndex框架
 
 **llama-agents架构**:
@@ -418,6 +424,12 @@ Real-time updates and notifications
 - AgentWorker组件负责实际执行
 - 控制平面管理任务分配和协调
 - 支持水平扩展和负载均衡
+
+**通信方式**:
+- **HTTP/REST**: Agent作为微服务通过HTTP端点通信
+- **消息队列**: 使用Redis等消息中间件进行异步通信
+- **控制平面协调**: 由LLM驱动的中央控制器分配任务
+- **Agent Cards**: 类似A2A的Agent发现和描述机制
 
 ### 5.3 AutoGen框架
 
@@ -431,6 +443,13 @@ Real-time updates and notifications
 - 上下文感知的对话管理
 - 动态角色分配和任务委派
 
+**通信方式**:
+- **对话式通信**: Agent通过自然语言对话交换信息
+- **GroupChat**: 多Agent群聊模式，支持发言人选择机制
+- **函数调用**: 通过函数调用实现Agent间协作
+- **上下文共享**: 共享对话历史和状态变量
+- **事件驱动**: 基于消息事件触发Agent行为
+
 ### 5.4 CrewAI框架
 
 **设计哲学**:
@@ -442,6 +461,13 @@ Real-time updates and notifications
 - 集中式任务管理
 - 动态工作流调整
 - 结果聚合和质量控制
+
+**通信方式**:
+- **角色驱动通信**: Agent根据预定义角色进行交互
+- **任务委派**: 通过任务分配机制实现Agent间通信
+- **共享内存**: 使用共享的上下文和结果存储
+- **YAML配置**: 通过声明式配置定义Agent关系和通信模式
+- **结果传递**: 前一个Agent的结果作为下一个Agent的输入
 
 ---
 
