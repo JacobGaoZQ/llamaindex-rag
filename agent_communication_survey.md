@@ -407,16 +407,10 @@ Real-time updates and notifications
 - 灵活的消息路由机制
 - 内置错误处理和恢复机制
 
-**通信方式**:
-- **LangGraph**: 基于图的状态机，Agent通过边（edges）传递消息
-- **消息传递**: 使用`MessagesState`维护对话历史
-- **工具调用**: Agent通过工具调用间接通信（如`forward_message`工具）
-- **共享状态**: 通过图节点状态共享上下文信息
-
-**协议支持**:
-- **MCP（原生支持）**: 通过 `langchain-mcp-adapters` 库接入 MCP Server，将 MCP 工具直接转换为 LangGraph 可调用的工具节点
-- **A2A（社区支持）**: 原生集成尚在规划中，可通过 HTTP 调用手动集成 A2A Remote Agent，社区已有实现方案
-- **ACP（不支持）**: 无官方集成，可通过 REST 手动调用
+**Agent间通信协议**:
+- **框架内部**: Agent 间通过 LangGraph 图的有向边传递共享状态（`MessagesState`），无独立协议，属于进程内通信
+- **工具接入（MCP）**: 通过 `langchain-mcp-adapters` 原生支持 MCP，将 MCP Server 工具转换为 LangGraph 工具节点
+- **跨Agent协作（A2A）**: 原生支持尚在规划，社区已有通过 HTTP 手动集成 A2A Remote Agent 的方案
 
 ### 5.2 LlamaIndex框架
 
@@ -430,16 +424,10 @@ Real-time updates and notifications
 - 控制平面管理任务分配和协调
 - 支持水平扩展和负载均衡
 
-**通信方式**:
-- **HTTP/REST**: Agent作为微服务通过HTTP端点通信
-- **消息队列**: 使用Redis等消息中间件进行异步通信
-- **控制平面协调**: 由LLM驱动的中央控制器分配任务
-- **Agent Cards**: 类似A2A的Agent发现和描述机制
-
-**协议支持**:
-- **MCP（原生支持）**: 通过 `llama-index-tools-mcp` 集成 MCP Server，支持将 MCP 工具挂载到 LlamaIndex Agent
-- **A2A（社区支持）**: 可通过 A2A SDK 构建兼容 A2A 协议的 Agent Server，已有社区示例（`a2a_llama_index_file_chat`）
-- **ACP（不支持）**: 无官方集成
+**Agent间通信协议**:
+- **框架内部**: Agent 以微服务形式运行，通过 HTTP/REST 互相调用，控制平面负责任务路由与编排
+- **工具接入（MCP）**: 通过 `llama-index-tools-mcp` 原生支持 MCP，将 MCP 工具挂载至 Agent
+- **跨Agent协作（A2A）**: 社区支持，可通过 A2A SDK 将 LlamaIndex Agent 封装为 A2A Server 对外暴露
 
 ### 5.3 AutoGen框架
 
@@ -453,17 +441,10 @@ Real-time updates and notifications
 - 上下文感知的对话管理
 - 动态角色分配和任务委派
 
-**通信方式**:
-- **对话式通信**: Agent通过自然语言对话交换信息
-- **GroupChat**: 多Agent群聊模式，支持发言人选择机制
-- **函数调用**: 通过函数调用实现Agent间协作
-- **上下文共享**: 共享对话历史和状态变量
-- **事件驱动**: 基于消息事件触发Agent行为
-
-**协议支持**:
-- **MCP（原生支持）**: AutoGen / AG2 内置 MCP 工具集成，可将 MCP Server 的工具直接挂载给 Agent 使用
-- **A2A（原生支持）**: AG2 v0.10.0 起正式内置 A2A 协议支持，Agent 可作为 A2A Server 或 Client 与外部 Agent 互通
-- **ACP（不支持）**: 无官方集成
+**Agent间通信协议**:
+- **框架内部**: Agent 之间通过消息对象直接传递，支持 GroupChat 多Agent对话模式，属于进程内或本地通信
+- **工具接入（MCP）**: AG2 原生支持 MCP，可将 MCP Server 工具直接挂载给 Agent
+- **跨Agent协作（A2A）**: AG2 v0.10.0 起**原生内置** A2A 协议，Agent 可作为 A2A Server 或 Client 与任意外部 Agent 互通
 
 ### 5.4 CrewAI框架
 
@@ -477,17 +458,10 @@ Real-time updates and notifications
 - 动态工作流调整
 - 结果聚合和质量控制
 
-**通信方式**:
-- **角色驱动通信**: Agent根据预定义角色进行交互
-- **任务委派**: 通过任务分配机制实现Agent间通信
-- **共享内存**: 使用共享的上下文和结果存储
-- **YAML配置**: 通过声明式配置定义Agent关系和通信模式
-- **结果传递**: 前一个Agent的结果作为下一个Agent的输入
-
-**协议支持**:
-- **MCP（支持）**: 通过 `crewai-tools` 的 MCP 适配器接入 MCP Server，将工具挂载至 Agent
-- **A2A（原生支持）**: CrewAI 将 A2A 作为一等委派原语（first-class delegation primitive），使用 `a2a-sdk` 和 `A2AClientConfig` 可将远程 A2A Agent 当作本地 Agent 直接委派
-- **ACP（不支持）**: 无官方集成
+**Agent间通信协议**:
+- **框架内部**: Agent 通过任务结果链式传递（前序 Agent 输出作为后续 Agent 输入），Crew 统一调度，属于进程内通信
+- **工具接入（MCP）**: 通过 `crewai-tools` MCP 适配器支持 MCP Server 工具接入
+- **跨Agent协作（A2A）**: **原生支持**，将 A2A 作为一等委派原语，使用 `a2a-sdk` 可直接将远程 A2A Agent 作为本地 Agent 委派
 
 ---
 
