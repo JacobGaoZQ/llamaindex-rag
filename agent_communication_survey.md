@@ -465,11 +465,23 @@ Real-time updates and notifications
 
 ---
 
-## 6. OpenClaw 多Agent通信机制
+## 6. OpenClaw 与 ZeroClaw 多Agent通信机制
+
+### 6.0 架构对比概览
+
+![Claw生态系统架构对比](images/claw_ecosystem_comparison.png)
+
+**OpenClaw** 和 **ZeroClaw** 构成 Claw AI Agent 生态系统的两大核心实现，分别面向不同场景：
+- **OpenClaw**: 企业级全功能框架，基于 Node.js/Go
+- **ZeroClaw**: 高性能轻量级替代方案，基于 Rust
+
+---
+
+## 6.1 OpenClaw 多Agent通信机制
 
 ![OpenClaw多Agent通信架构](images/openclaw_multiagent_communication.png)
 
-### 6.1 OpenClaw 简介
+### 6.1.1 OpenClaw 简介
 
 OpenClaw 是一个开源的、可自托管的 AI Agent 框架，以**网关中心化架构（Gateway-Centric Architecture）**为核心设计。与 LangChain、CrewAI 等框架相比，OpenClaw 强调**确定性执行**和**生产就绪**，适合企业级部署。
 
@@ -492,7 +504,7 @@ OpenClaw 是一个开源的、可自托管的 AI Agent 框架，以**网关中�
    └────────┘    └────────┘    └────────┘
 ```
 
-### 6.2 核心通信组件
+### 6.1.2 核心通信组件
 
 #### Gateway Server（中央网关）
 - 所有 Agent 间通信**必须经过网关**，不存在点对点直连
@@ -524,7 +536,7 @@ LLM 返回工具调用？
     └── 否 ──► 输出最终结果
 ```
 
-### 6.3 Agent 定义与配置
+### 6.1.3 Agent 定义与配置
 
 OpenClaw 使用 `agents.yaml` 声明式配置多 Agent 系统：
 
@@ -556,7 +568,7 @@ agents:
 - **`agent.md`**：配置参数（模型、工具列表等）
 - **`user.md`**：当前用户上下文与偏好
 
-### 6.4 Agent 间通信方式
+### 6.1.4 Agent 间通信方式
 
 #### 方式一：agentToAgent 工具调用（直接委派）
 
@@ -632,7 +644,7 @@ def on_code_completed(event):
     start_code_review(event["artifact"])
 ```
 
-### 6.5 三种编排模式
+### 6.1.5 三种编排模式
 
 #### 模式一：Hub-and-Spoke（中心辐射）
 
@@ -677,7 +689,7 @@ Critic ◄──► Writer
 - 动态决定下一步由哪个 Agent 处理
 - **优点**：灵活高效；**缺点**：难以追踪和调试
 
-### 6.6 渠道接入（Channel Mode）
+### 6.1.6 渠道接入（Channel Mode）
 
 OpenClaw 支持通过外部通信平台接入多 Agent 系统：
 
@@ -702,25 +714,327 @@ OpenClaw 支持通过外部通信平台接入多 Agent 系统：
 
 支持平台：飞书（Feishu）、WhatsApp、Slack 等，通过群组/频道 ID 路由到对应 Agent。
 
-### 6.7 协议支持
+### 6.1.7 协议支持
 
 - **MCP（支持）**: 通过 MCP Server 接入外部工具，Agent Runner 可调用 MCP 工具完成任务
 - **A2A（社区支持）**: 可通过 `agentToAgent` 工具调用外部 A2A 兼容 Agent；官方原生集成尚在规划中
 - **ACP（不支持）**: 无官方集成，可通过 HTTP 手动调用 ACP Agent
 
-### 6.8 与其他框架的通信对比
+---
 
-| 特性 | OpenClaw | LangChain | AutoGen(AG2) | CrewAI |
-|------|----------|-----------|---------|--------|
-| **通信架构** | 网关中心化 | 图形化路由 | 对话式 | 角色驱动 |
-| **执行确定性** | 高（Lane Queue）| 中等 | 中等 | 中等 |
-| **Agent发现** | YAML配置 | 代码定义 | 代码定义 | YAML配置 |
-| **渠道集成** | 原生支持 | 需扩展 | 不支持 | 不支持 |
-| **共享内存** | 内置 | LangGraph | 内置 | 内置 |
-| **自托管** | 原生支持 | 需配置 | 支持 | 支持 |
-| **MCP支持** | 支持 | 原生支持 | 原生支持 | 支持 |
-| **A2A支持** | 社区支持 | 社区支持 | 原生支持 | 原生支持 |
-| **ACP支持** | 不支持 | 不支持 | 不支持 | 不支持 |
+## 6.3 与其他框架的通信对比
+
+| 特性 | OpenClaw | ZeroClaw | LangChain | AutoGen(AG2) | CrewAI |
+|------|----------|----------|-----------|---------|--------|
+| **通信架构** | 网关中心化 | Channel-based | 图形化路由 | 对话式 | 角色驱动 |
+| **执行确定性** | 高（Lane Queue）| 高（Channel）| 中等 | 中等 | 中等 |
+| **Agent发现** | YAML配置 | TOML配置 | 代码定义 | 代码定义 | YAML配置 |
+| **渠道集成** | 原生支持 | 原生支持 | 需扩展 | 不支持 | 不支持 |
+| **共享内存** | 内置 | SQLite/Vector | LangGraph | 内置 | 内置 |
+| **自托管** | 原生支持 | 原生支持 | 需配置 | 支持 | 支持 |
+| **资源占用** | 中等（200MB+）| 极低（<5MB）| 中等 | 中等 | 中等 |
+| **启动时间** | 1-5秒 | <10ms | 中等 | 中等 | 快 |
+| **MCP支持** | 支持 | 原生支持 | 原生支持 | 原生支持 | 支持 |
+| **A2A支持** | 社区支持 | 社区支持 | 社区支持 | 原生支持 | 原生支持 |
+| **ACP支持** | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
+| **gRPC支持** | 不支持 | 原生支持 | 需扩展 | 需扩展 | 不支持 |
+
+---
+
+## 6.2 ZeroClaw 多Agent通信机制
+
+![ZeroClaw轻量级架构](images/zeroclaw_architecture.png)
+
+### 6.2.1 ZeroClaw 简介
+
+ZeroClaw 是 OpenClaw 的 Rust 原生重实现，专为**资源受限环境**和**高性能场景**设计。作为 Claw 生态系统的轻量级替代方案，ZeroClaw 在保持与 OpenClaw 95% API 兼容性的同时，实现了极致的资源效率。
+
+**核心设计目标**：
+- **极致轻量**: 二进制仅 3-5 MB，内存占用 < 5 MB（空闲状态）
+- **快速启动**: 冷启动时间 < 10 ms（OpenClaw 需要 1.25-5 秒）
+- **内存安全**: 利用 Rust 所有权模型实现编译时内存安全，零 CVE 漏洞
+- **边缘就绪**: 支持静态链接和交叉编译，适用于嵌入式和 IoT 设备
+
+**核心架构组成**：
+
+```
+┌─────────────────────────────────────────────┐
+│           ZeroClaw Core Engine               │
+│         (Rust-based, Trait-based)            │
+│                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ Channel  │  │ Channel  │  │ Channel  │  │
+│  │  Core    │  │  HTTP/2  │  │WebSocket │  │
+│  └──────────┘  └──────────┘  └──────────┘  │
+│                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │  SQLite  │  │  Vector  │  │  Plugin  │  │
+│  │  Memory  │  │  Memory  │  │  System  │  │
+│  └──────────┘  └──────────┘  └──────────┘  │
+└─────────────────────────────────────────────┘
+```
+
+### 6.2.2 基于特性的模块化架构
+
+ZeroClaw 采用**基于特性的架构（Trait-based Architecture）**，将功能划分为四个核心层：
+
+#### Core Engine（核心引擎层）
+- Agent 生命周期管理
+- 任务调度与执行
+- 状态机管理
+
+#### Transport Layer（传输层）
+- **HTTP/2**: 高性能请求-响应通信
+- **WebSocket**: 全双工实时流式通信
+- **gRPC**: 内部服务间高效通信
+
+#### Plugin System（插件层）
+- 动态加载扩展（Rust dylib）
+- 热插拔能力
+- 自定义工具集成
+
+#### Security Layer（安全层）
+- 编译时内存安全保证
+- 沙箱执行环境
+- 零依赖漏洞风险
+
+### 6.2.3 Channel-based 通信机制
+
+ZeroClaw 采用**通道（Channel）**作为核心通信抽象，替代 OpenClaw 的 Gateway-Lane 架构：
+
+#### Channel 类型
+
+| Channel 类型 | 协议 | 适用场景 | 特点 |
+|-------------|------|----------|------|
+| **Core Channel** | 内存通道 | 单机多 Agent | 零拷贝，极低延迟 |
+| **HTTP Channel** | HTTP/2 | 跨服务通信 | 标准 REST API |
+| **WebSocket Channel** | WebSocket | 实时流式 | 双向推送 |
+| **gRPC Channel** | gRPC | 内部微服务 | 高性能二进制 |
+
+#### 通信流程示例
+
+```rust
+// Agent A 通过 Channel 向 Agent B 发送消息
+let channel = Channel::http("http://agent-b:8080");
+let message = Message::new()
+    .with_sender("agent-a")
+    .with_recipient("agent-b")
+    .with_payload(json!({
+        "task": "analyze_data",
+        "data": dataset
+    }));
+
+channel.send(message).await?;
+```
+
+### 6.2.4 轻量级内存管理
+
+ZeroClaw 提供两种内存后端，适应不同场景：
+
+#### SQLite 内存（默认）
+- 持久化对话历史
+- 支持结构化查询
+- 适合长期运行的 Agent
+
+```rust
+use zeroclaw::memory::SqliteMemory;
+
+let memory = SqliteMemory::new("agent.db").await?;
+memory.store("conversation_001", &messages).await?;
+```
+
+#### Vector 内存（可选）
+- 基于向量数据库的语义记忆
+- 支持相似度检索
+- 适合 RAG 场景
+
+### 6.2.5 Agent 定义与配置
+
+ZeroClaw 使用 TOML 格式配置（与 OpenClaw 的 YAML 兼容）：
+
+```toml
+[agent]
+id = "analyzer"
+name = "DataAnalyzer"
+version = "1.0.0"
+
+[agent.soul]
+path = "analyzer_soul.md"
+personality = "analytical"
+
+[agent.memory]
+type = "sqlite"
+path = "./memory.db"
+
+[agent.channels]
+default = "http"
+http = { port = 8080, host = "0.0.0.0" }
+websocket = { port = 8081, enabled = true }
+
+[agent.plugins]
+load = ["data_processor", "visualizer"]
+```
+
+### 6.2.6 多Agent编排模式
+
+ZeroClaw 支持三种编排模式，与 OpenClaw 保持一致：
+
+#### 模式一：Hub-and-Spoke（中心辐射）
+
+```rust
+use zeroclaw::orchestration::HubSpoke;
+
+let hub = HubSpoke::new()
+    .with_hub("planner")
+    .with_spoke("coder")
+    .with_spoke("reviewer")
+    .build()?;
+
+hub.execute(task).await?;
+```
+
+#### 模式二：Pipeline（流水线）
+
+```rust
+use zeroclaw::orchestration::Pipeline;
+
+let pipeline = Pipeline::new()
+    .add_stage("planner")
+    .add_stage("coder")
+    .add_stage("tester")
+    .build()?;
+
+pipeline.run(input).await?;
+```
+
+#### 模式三：Swarm（群体协作）
+
+```rust
+use zeroclaw::orchestration::Swarm;
+
+let swarm = Swarm::new()
+    .add_agent("researcher")
+    .add_agent("writer")
+    .add_agent("editor")
+    .with_coordination(Coordination::Decentralized)
+    .build()?;
+
+swarm.collaborate(goal).await?;
+```
+
+### 6.2.7 可观测性与监控
+
+ZeroClaw 内置企业级可观测性：
+
+```rust
+// Prometheus 指标
+use zeroclaw::metrics::PrometheusExporter;
+PrometheusExporter::new("0.0.0.0:9090").start()?;
+
+// OpenTelemetry 追踪
+use zeroclaw::telemetry::OpenTelemetry;
+OpenTelemetry::init("http://jaeger:4317")?;
+```
+
+### 6.2.8 协议支持
+
+| 协议 | ZeroClaw 支持状态 | 说明 |
+|------|------------------|------|
+| **MCP** | 原生支持 | 通过 `zeroclaw-mcp` crate 集成 |
+| **A2A** | 社区支持 | 通过 `zeroclaw-a2a` 社区 crate |
+| **ACP** | 不支持 | 可通过 HTTP 手动调用 |
+| **OpenClaw API** | 95% 兼容 | 直接读取 OpenClaw 配置 |
+
+---
+
+---
+
+## 6.4 OpenClaw vs ZeroClaw 深度对比
+
+### 6.3.1 架构设计对比
+
+| 维度 | OpenClaw | ZeroClaw |
+|------|----------|----------|
+| **实现语言** | Node.js / Go | Rust |
+| **架构风格** | Gateway-Centric（网关中心化） | Channel-based（通道化） |
+| **二进制大小** | 15-298 MB | 3-5 MB |
+| **内存占用（空闲）** | 145-400 MB | < 5 MB |
+| **冷启动时间** | 1.25-5 秒 | < 10 ms |
+| **运行时依赖** | Node.js / Go Runtime | 零依赖（静态链接） |
+
+### 6.3.2 通信机制对比
+
+| 特性 | OpenClaw | ZeroClaw |
+|------|----------|----------|
+| **核心通信** | Lane Queue（确定性串行） | Channel（灵活异步） |
+| **消息路由** | Gateway 集中路由 | 点对点直连或经由 Channel |
+| **传输协议** | HTTP/REST, WebSocket | HTTP/2, WebSocket, gRPC |
+| **消息保证** | At-least-once | At-least-once（可配置） |
+| **流式支持** | SSE | WebSocket, HTTP/2 Stream |
+| **跨服务通信** | 通过 Gateway | 原生支持多种 Channel |
+
+### 6.3.3 多Agent协作对比
+
+| 协作模式 | OpenClaw 实现 | ZeroClaw 实现 |
+|----------|--------------|---------------|
+| **Hub-and-Spoke** | Gateway 作为中心协调器 | Core Engine 协调 Channels |
+| **Pipeline** | Lane Queue 顺序传递 | Pipeline Trait 顺序执行 |
+| **Swarm** | Agent 间通过 Gateway 中转 | Agent 间直接 Channel 连接 |
+| **Shared Memory** | 内置 Memory 模块 | SQLite / Vector Memory |
+| **Event Queue** | 内置 Event 系统 | 通过 Channel 实现 Pub/Sub |
+
+### 6.3.4 性能与资源对比
+
+| 指标 | OpenClaw | ZeroClaw | 提升倍数 |
+|------|----------|----------|----------|
+| **二进制大小** | 50 MB (平均) | 4 MB | **12.5x** |
+| **内存占用（空闲）** | 200 MB | 5 MB | **40x** |
+| **内存占用（负载）** | 1-2 GB | 50-100 MB | **15x** |
+| **启动时间** | 2.5 秒 | 8 ms | **312x** |
+| **并发连接** | ~10,000 | ~100,000 | **10x** |
+| **吞吐量（RPS）** | 5,000 | 50,000 | **10x** |
+
+### 6.3.5 安全性对比
+
+| 安全特性 | OpenClaw | ZeroClaw |
+|----------|----------|----------|
+| **内存安全** | 运行时 GC（存在泄漏风险） | 编译时所有权检查（零风险） |
+| **CVE 漏洞** | 依赖 Node.js/Go 生态漏洞 | 零 CVE（Rust 保证） |
+| **沙箱执行** | 容器级隔离 | 进程级 + 编译时安全 |
+| **依赖攻击面** | 大（npm/go mod 依赖树） | 小（Cargo 精简依赖） |
+
+### 6.3.6 适用场景对比
+
+| 场景 | 推荐选择 | 原因 |
+|------|----------|------|
+| **企业级生产环境** | OpenClaw | 功能完整，生态成熟，企业支持 |
+| **边缘计算 / IoT** | ZeroClaw | 资源受限，需要极致轻量 |
+| **CI/CD Runner** | ZeroClaw | 快速启动，低内存占用 |
+| **高并发微服务** | ZeroClaw | 高吞吐，低延迟 |
+| **快速原型开发** | OpenClaw | 开发友好，调试便利 |
+| **嵌入式系统** | ZeroClaw | 交叉编译，静态链接 |
+| **多租户 SaaS** | ZeroClaw | 高密度部署，资源隔离 |
+
+### 6.3.7 通信协议支持对比
+
+| 协议 | OpenClaw | ZeroClaw |
+|------|----------|----------|
+| **MCP** | 支持 | 原生支持 |
+| **A2A** | 社区支持 | 社区支持 |
+| **ACP** | 不支持 | 不支持 |
+| **自定义 HTTP** | 支持 | 支持 |
+| **gRPC** | 不支持 | 原生支持 |
+| **WebSocket** | 支持 | 支持 |
+
+### 6.3.8 迁移指南
+
+从 OpenClaw 迁移到 ZeroClaw 的主要注意事项：
+
+1. **配置格式**: YAML → TOML（工具自动转换）
+2. **Gateway 模式**: 需调整为中心化 Core Engine
+3. **插件系统**: Node.js/Go 插件 → Rust dylib
+4. **内存存储**: 内置 Memory → SQLite/Vector Memory
+5. **监控指标**: 相同 Prometheus/OpenTelemetry 接口
 
 ---
 
@@ -877,6 +1191,7 @@ OpenClaw 支持通过外部通信平台接入多 Agent 系统：
 | **AutoGen** | 中等 | 高 | 中等 | 中等 |
 | **CrewAI** | 高 | 中等 | 中等 | 低 |
 | **OpenClaw** | 中等 | 高 | 高 | 中等 |
+| **ZeroClaw** | 中等 | 高 | 高 | 高 |
 
 ### 10.3 通信载体对比
 
@@ -932,6 +1247,13 @@ OpenClaw 支持通过外部通信平台接入多 Agent 系统：
 - **中型项目**: LangChain + ACP组合
 - **大型企业**: MCP + A2A + 混合架构
 - **生产自托管**: OpenClaw（网关中心化，确定性执行）
+- **边缘/高性能场景**: ZeroClaw（极致轻量，Rust 高性能）
+
+#### 资源约束考量
+- **资源充足环境**: OpenClaw（功能完整，生态丰富）
+- **资源受限环境**: ZeroClaw（<5MB 内存，<10ms 启动）
+- **嵌入式/IoT**: ZeroClaw（静态链接，交叉编译）
+- **高密度部署**: ZeroClaw（多租户，低资源占用）
 
 #### 安全要求评估
 - **一般安全**: HTTP REST + 基础认证
@@ -1010,6 +1332,14 @@ OpenClaw 支持通过外部通信平台接入多 Agent 系统：
 - [OpenClaw Agents (shenhao-stu) - GitHub](https://github.com/shenhao-stu/openclaw-agents)
 - [Why OpenClaw's Architecture Might Be the Most Enterprise-Ready](https://www.linkedin.com/pulse/why-openclaws-architecture-might-most-open-agent-framework-bala-j-iak7f)
 - [Multi-agent orchestration patterns - OpenClaw Issues #43034](https://github.com/openclaw/openclaw/issues/43034)
+
+### ZeroClaw
+
+- [ZeroClaw Review 2025: Rust-based OpenClaw Alternative - SparkCo AI](https://sparkco.ai/blog/zeroclaw-review-the-rust-based-openclaw-alternative-with-99-smaller-footprint)
+- [ZeroClaw: A Minimal Rust-Based AI Agent Framework - DEV Community](https://dev.to/lightningdev123/zeroclaw-a-minimal-rust-based-ai-agent-framework-for-self-hosted-systems-5593)
+- [THE CLAW AI AGENT ECOSYSTEM - Medium](https://medium.com/@sanjeeva.bora/the-claw-ai-agent-ecosystem-4a031e4e95aa)
+- [7 Best Lightweight AI Agent Frameworks for 2026 - Waves and Algorithms](https://wavesandalgorithms.com/reviews/zeroclaw)
+- [ZeroClaw AI Agent for Lightweight Automation - LinkedIn](https://www.linkedin.com/posts/bk-han_zeroclaw-onemanarmy-aiautomation-activity-7430488196175757313-gE4S)
 
 ### 安全与认证
 
