@@ -2,25 +2,26 @@
 多模态 RAG 系统
 支持文字 + 图片的智能问答
 """
-from .pdf_parser import PDFParser, ParsedDocument, ImageInfo, TextBlock, parse_pdf_directory
-from .multimodal_index import MultimodalIndexBuilder, MultimodalIndexManager
-from .multimodal_query import (
-    MultimodalQueryEngine,
-    MultimodalRAGSystem,
-    MultimodalResult,
-    format_result
+# 统一管道（推荐）
+from .unified_pipeline import (
+    UnifiedRAGSystem,
+    PDFToMarkdownConverter,
+    MarkdownParser,
+    TOCItem,
+    Section,
+    ImageInfo,
+    ProcessedDocument,
+    process_pdf_and_build_index,
 )
 
 __all__ = [
-    'PDFParser',
-    'ParsedDocument',
+    # 统一管道
+    'UnifiedRAGSystem',
+    'PDFToMarkdownConverter',
+    'MarkdownParser',
+    'TOCItem',
+    'Section',
     'ImageInfo',
-    'TextBlock',
-    'parse_pdf_directory',
-    'MultimodalIndexBuilder',
-    'MultimodalIndexManager',
-    'MultimodalQueryEngine',
-    'MultimodalRAGSystem',
-    'MultimodalResult',
-    'format_result'
+    'ProcessedDocument',
+    'process_pdf_and_build_index',
 ]

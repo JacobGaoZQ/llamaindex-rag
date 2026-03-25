@@ -5,6 +5,7 @@ autopep8
 # App
 flask
 streamlit              # Web UI 框架
+httpx                  # HTTP 客户端，用于调用多模态 API
 
 # LlamaIndex & LangChain
 llama-index-core
@@ -15,11 +16,15 @@ langchain-core
 langchain
 
 # LlamaParse (官方文档解析)
-llama-parse            # LlamaCloud 文档解析服务
+# llama-parse          # 已替换为 MinerU
+
+# MinerU (PDF 转 Markdown)
+mineru[core]           # PDF 转 Markdown，支持布局分析、OCR、公式识别
+Pillow                 # 图片尺寸读取
 
 # 文件转换依赖
-pymupdf4llm          # PDF 转 Markdown (推荐)
-PyMuPDF              # PDF 处理基础库
+# pymupdf4llm        # 已替换为 MinerU
+# PyMuPDF            # 已替换为 MinerU
 mammoth              # Word(docx) 转 Markdown
 python-docx          # Word 备选方案
 pandas               # Excel/CSV 处理

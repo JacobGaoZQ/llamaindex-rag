@@ -2,7 +2,7 @@
 # 启动多模态 RAG 系统 Web UI
 
 # 设置 API Key（请替换为你的实际 API Key）
-export QWEN_API_KEY="${QWEN_API_KEY:-xxxxxx}"
+export QWEN_API_KEY="sk-62c3f30ff4764eb9b3e1dc94bac59530"
 
 # 禁用 Streamlit 使用统计
 export STREAMLIT_BROWSER_GATHER_USAGE_STATS=false

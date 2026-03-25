@@ -2,20 +2,18 @@
 统一 PDF 处理管道
 
 完整流程：
-PDF -> Markdown(含目录) -> 章节解析 -> 图文关联 -> 图片描述 -> 向量索引 -> 查询
+PDF -> MinerU转Markdown(含目录+图片) -> 章节解析 -> 图片描述 -> 向量索引 -> 查询
 """
 import os
+import copy
 import json
-import hashlib
 import re
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from collections import defaultdict
 
-import fitz
-from llama_parse import LlamaParse
 from llama_index.core import VectorStoreIndex, Document, Settings, StorageContext
 from llama_index.core.node_parser import MarkdownNodeParser
 from llama_index.embeddings.dashscope import DashScopeEmbedding
@@ -42,7 +40,7 @@ class ImageInfo:
     bbox: Tuple[float, float, float, float]
     width: int
     height: int
-    image_type: str = "bitmap"  # bitmap 或 vector
+    image_type: str = "bitmap"
     caption: str = ""
 
 
@@ -73,42 +71,30 @@ class ProcessedDocument:
 
 class PDFToMarkdownConverter:
     """
-    PDF 转 Markdown 转换器
-    - 提取目录结构
-    - 提取位图和矢量图形
-    - 生成带页码标记的 Markdown
+    使用 MinerU 将 PDF 转换为 Markdown
+    - 自动提取目录结构
+    - 自动提取图片（位图+矢量）
+    - 生成带图片引用的 Markdown
     """
 
     def __init__(
         self,
-        llama_cloud_api_key: Optional[str] = None,
         image_output_dir: str = "./output/images",
         verbose: bool = True,
+        lang: str = "ch",
+        backend: str = "pipeline",
+        parse_method: str = "auto",
     ):
-        self.api_key = llama_cloud_api_key
         self.image_output_dir = Path(image_output_dir)
         self.image_output_dir.mkdir(parents=True, exist_ok=True)
         self.verbose = verbose
-
-        # 初始化 LlamaParse
-        if self.api_key:
-            self.llama_parser = LlamaParse(
-                api_key=self.api_key,
-                result_type="markdown",
-                verbose=verbose,
-                invalidate_cache=False,
-                fast_mode=False,
-                skip_diagonal_text=False,
-                page_separator="\n\n---\n\n",
-            )
-        else:
-            self.llama_parser = None
-            if verbose:
-                print("[警告] 未提供 LlamaCloud API Key，将使用 PyMuPDF 解析文本")
+        self.lang = lang
+        self.backend = backend
+        self.parse_method = parse_method
 
     def convert(self, pdf_path: str) -> Tuple[str, List[TOCItem], List[ImageInfo], Dict]:
         """
-        转换 PDF 为 Markdown
+        使用 MinerU 转换 PDF 为 Markdown
 
         Returns:
             (markdown_content, toc, images, doc_info)
@@ -120,347 +106,237 @@ class PDFToMarkdownConverter:
         doc_name = pdf_path.stem
 
         if self.verbose:
-            print(f"[转换] {pdf_path.name} -> Markdown...")
+            print(f"[MinerU] 转换 {pdf_path.name} -> Markdown...")
 
-        # 1. 提取目录和文档信息
-        toc, doc_info = self._extract_toc_and_info(str(pdf_path))
+        # 1. 使用 MinerU 转换
+        mineru_output_dir = self.image_output_dir.parent / "mineru_temp"
+        mineru_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 2. 提取图片（位图 + 矢量）
-        images = self._extract_all_images(str(pdf_path), doc_name)
+        self._run_mineru(str(pdf_path), str(mineru_output_dir))
 
-        # 3. 转换文本为 Markdown
-        if self.llama_parser:
-            markdown_content = self._convert_with_llamaparse(str(pdf_path))
-        else:
-            markdown_content = self._convert_with_pymupdf(str(pdf_path))
+        # 2. 读取 MinerU 输出
+        md_dir = mineru_output_dir / doc_name / self.parse_method
+        md_file = md_dir / f"{doc_name}.md"
+        images_dir = md_dir / "images"
+
+        if not md_file.exists():
+            raise RuntimeError(f"MinerU 转换失败，未找到输出: {md_file}")
+
+        markdown_content = md_file.read_text(encoding="utf-8")
+
+        # 3. 提取图片信息并移动到统一目录
+        images = self._collect_images(images_dir, doc_name)
+
+        # 4. 更新 Markdown 中的图片路径为统一路径
+        markdown_content = self._rewrite_image_paths(markdown_content, images_dir, doc_name)
+
+        # 5. 从 Markdown 中提取目录结构
+        toc = self._extract_toc_from_markdown(markdown_content)
+
+        # 6. 读取 content_list 获取文档信息
+        doc_info = self._extract_doc_info(md_dir, doc_name, pdf_path)
+
+        # 7. 清理 MinerU 临时目录
+        shutil.rmtree(mineru_output_dir, ignore_errors=True)
 
         if self.verbose:
             print(f"  完成: {len(toc)} 个目录项, {len(images)} 张图片")
 
         return markdown_content, toc, images, doc_info
 
-    def _extract_toc_and_info(self, pdf_path: str) -> Tuple[List[TOCItem], Dict]:
-        """提取 PDF 目录结构和文档信息"""
-        doc = fitz.open(pdf_path)
-        toc = []
-        doc_info = {
-            "title": doc.metadata.get("title", ""),
-            "author": doc.metadata.get("author", ""),
-            "total_pages": len(doc),
-        }
+    def _run_mineru(self, pdf_path: str, output_dir: str):
+        """调用 MinerU 进行 PDF 转换"""
+        from mineru.cli.common import (
+            convert_pdf_bytes_to_bytes_by_pypdfium2,
+            prepare_env,
+            read_fn,
+        )
+        from mineru.data.data_reader_writer import FileBasedDataWriter
+        from mineru.utils.enum_class import MakeMode
+        from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
+        from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
+        from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
 
-        # 提取内置目录
-        try:
-            pdf_toc = doc.get_toc()
-            for item in pdf_toc:
-                level, title, page = item[0], item[1], item[2]
-                anchor = self._generate_anchor(title)
-                toc.append(TOCItem(level=level, title=title, page_num=page, anchor=anchor))
-        except Exception as e:
-            if self.verbose:
-                print(f"  [警告] 提取目录失败: {e}")
+        pdf_name = Path(pdf_path).stem
+        pdf_bytes = read_fn(pdf_path)
+        pdf_bytes = convert_pdf_bytes_to_bytes_by_pypdfium2(pdf_bytes, 0, None)
 
-        # 如果没有目录，从文本中提取
-        if not toc:
-            toc = self._extract_toc_from_text(doc)
+        # 使用 pipeline 后端进行分析
+        if self.verbose:
+            print(f"  [MinerU] 正在分析文档布局...")
 
-        doc.close()
-        return toc, doc_info
-
-    def _extract_toc_from_text(self, doc: fitz.Document) -> List[TOCItem]:
-        """从文本中提取目录（备用方案）"""
-        toc = []
-        seen_titles = set()
-
-        for page_num in range(min(10, len(doc))):
-            page = doc[page_num]
-            blocks = page.get_text("dict", flags=11)["blocks"]
-
-            for block in blocks:
-                if block["type"] != 0:
-                    continue
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        text = span["text"].strip()
-                        font_size = span["size"]
-                        flags = span["flags"]
-
-                        level = self._detect_heading_level(text, font_size, flags)
-                        if level > 0 and 0 < len(text) < 100 and text not in seen_titles:
-                            seen_titles.add(text)
-                            anchor = self._generate_anchor(text)
-                            toc.append(TOCItem(level=level, title=text, page_num=page_num + 1, anchor=anchor))
-
-        toc.sort(key=lambda x: (x.page_num, x.level))
-        return toc
-
-    def _detect_heading_level(self, text: str, font_size: float, flags: int) -> int:
-        """根据字体特征检测标题级别"""
-        is_bold = flags & 2**4
-        if font_size >= 20:
-            return 1
-        elif font_size >= 16:
-            return 2
-        elif font_size >= 14:
-            return 3
-        elif font_size >= 12 and is_bold and not text.endswith((".", ",", ";", "?", "!")):
-            return 4
-        return 0
-
-    def _generate_anchor(self, title: str) -> str:
-        """生成锚点链接"""
-        anchor = re.sub(r'[^\w\s-]', '', title.lower())
-        anchor = re.sub(r'[-\s]+', '-', anchor)
-        return anchor.strip('-')
-
-    def _extract_all_images(self, pdf_path: str, doc_name: str) -> List[ImageInfo]:
-        """提取所有图片（位图 + 矢量）"""
-        images = []
-        processed_hashes = set()
-        processed_regions = []
-
-        doc = fitz.open(pdf_path)
-
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-
-            # 提取位图
-            bitmap_images = self._extract_bitmap_images(
-                page, page_num, doc_name, doc, processed_hashes, processed_regions
+        infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = (
+            pipeline_doc_analyze(
+                [pdf_bytes],
+                [self.lang],
+                parse_method=self.parse_method,
+                formula_enable=True,
+                table_enable=True,
             )
-            images.extend(bitmap_images)
+        )
 
-            # 提取矢量图形
-            vector_images = self._extract_vector_graphics(
-                page, page_num, doc_name, processed_hashes, processed_regions
-            )
-            images.extend(vector_images)
+        model_list = infer_results[0]
+        images_list = all_image_lists[0]
+        pdf_doc = all_pdf_docs[0]
+        _lang = lang_list[0]
+        _ocr_enable = ocr_enabled_list[0]
 
-        doc.close()
-        return images
+        # 准备输出目录
+        local_image_dir, local_md_dir = prepare_env(output_dir, pdf_name, self.parse_method)
+        image_writer = FileBasedDataWriter(local_image_dir)
+        md_writer = FileBasedDataWriter(local_md_dir)
 
-    def _extract_bitmap_images(
-        self, page, page_num: int, doc_name: str, doc: fitz.Document,
-        processed_hashes: set, processed_regions: list
-    ) -> List[ImageInfo]:
-        """提取位图图片"""
+        if self.verbose:
+            print(f"  [MinerU] 正在生成 Markdown...")
+
+        # 生成中间 JSON
+        middle_json = pipeline_result_to_middle_json(
+            model_list, images_list, pdf_doc, image_writer,
+            _lang, _ocr_enable, True
+        )
+
+        pdf_info = middle_json["pdf_info"]
+        image_dir = str(os.path.basename(local_image_dir))
+
+        # 生成 Markdown
+        md_content = pipeline_union_make(pdf_info, MakeMode.MM_MD, image_dir)
+        md_writer.write_string(f"{pdf_name}.md", md_content)
+
+        # 生成 content_list（用于辅助提取信息）
+        content_list = pipeline_union_make(pdf_info, MakeMode.CONTENT_LIST, image_dir)
+        md_writer.write_string(
+            f"{pdf_name}_content_list.json",
+            json.dumps(content_list, ensure_ascii=False, indent=2),
+        )
+
+        if self.verbose:
+            print(f"  [MinerU] 输出目录: {local_md_dir}")
+
+    def _collect_images(self, images_dir: Path, doc_name: str) -> List[ImageInfo]:
+        """收集 MinerU 提取的图片并移动到统一目录"""
         images = []
-        processed_xrefs = set()
+        if not images_dir.exists():
+            return images
 
-        try:
-            image_list = page.get_images(full=True)
-            for img_index, img_info in enumerate(image_list):
-                try:
-                    xref = img_info[0]
-                    if xref in processed_xrefs:
-                        continue
-                    processed_xrefs.add(xref)
-
-                    base_image = doc.extract_image(xref)
-                    if not base_image:
-                        continue
-
-                    image_data = base_image["image"]
-                    image_ext = base_image.get("ext", "png")
-
-                    width, height = img_info[2], img_info[3]
-                    if width < 50 or height < 50:
-                        continue
-
-                    img_rects = page.get_image_rects(xref)
-                    if not img_rects:
-                        continue
-                    bbox = tuple(img_rects[0])
-
-                    if self._is_region_overlapping(page_num + 1, bbox, processed_regions):
-                        continue
-
-                    image_hash = hashlib.md5(image_data).hexdigest()
-                    if image_hash in processed_hashes:
-                        continue
-                    processed_hashes.add(image_hash)
-
-                    short_hash = image_hash[:16]
-                    image_id = f"{doc_name}_p{page_num + 1}_img_{img_index:03d}_{short_hash}"
-                    image_path = self.image_output_dir / f"{image_id}.{image_ext}"
-
-                    with open(image_path, "wb") as f:
-                        f.write(image_data)
-
-                    images.append(ImageInfo(
-                        image_id=image_id,
-                        file_path=str(image_path),
-                        page_num=page_num + 1,
-                        bbox=bbox,
-                        width=width,
-                        height=height,
-                        image_type="bitmap"
-                    ))
-                    processed_regions.append((page_num + 1, bbox))
-
-                except Exception:
-                    continue
-        except Exception as e:
-            if self.verbose:
-                print(f"  [警告] 提取位图失败 (页 {page_num + 1}): {e}")
-
-        return images
-
-    def _extract_vector_graphics(
-        self, page, page_num: int, doc_name: str,
-        processed_hashes: set, processed_regions: list
-    ) -> List[ImageInfo]:
-        """提取矢量图形"""
-        images = []
-
-        try:
-            drawings = page.get_drawings()
-            if not drawings:
-                return images
-
-            all_rects = []
-            for d in drawings:
-                if "rect" in d:
-                    rect = fitz.Rect(d["rect"])
-                    if rect.width >= 30 and rect.height >= 30:
-                        all_rects.append(rect)
-
-            if not all_rects:
-                return images
-
-            merged_rects = self._merge_rects(all_rects, threshold=30.0)
-
-            for idx, rect in enumerate(merged_rects):
-                try:
-                    width, height = int(rect.width), int(rect.height)
-                    if width < 80 or height < 80:
-                        continue
-
-                    page_width, page_height = page.rect.width, page.rect.height
-                    if width > page_width * 0.9 and height > page_height * 0.9:
-                        continue
-
-                    margin = 15
-                    clip_rect = fitz.Rect(
-                        max(0, rect.x0 - margin),
-                        max(0, rect.y0 - margin),
-                        min(page_width, rect.x1 + margin),
-                        min(page_height, rect.y1 + margin)
-                    )
-
-                    bbox_tuple = tuple(clip_rect)
-                    if self._is_region_overlapping(page_num + 1, bbox_tuple, processed_regions, iou_threshold=0.3):
-                        continue
-
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip_rect)
-                    image_data = pix.tobytes("png")
-
-                    image_hash = hashlib.md5(image_data).hexdigest()
-                    if image_hash in processed_hashes:
-                        continue
-                    processed_hashes.add(image_hash)
-
-                    short_hash = image_hash[:16]
-                    image_id = f"{doc_name}_p{page_num + 1}_vec_{idx:03d}_{short_hash}"
-                    image_path = self.image_output_dir / f"{image_id}.png"
-
-                    with open(image_path, "wb") as f:
-                        f.write(image_data)
-
-                    images.append(ImageInfo(
-                        image_id=image_id,
-                        file_path=str(image_path),
-                        page_num=page_num + 1,
-                        bbox=bbox_tuple,
-                        width=pix.width,
-                        height=pix.height,
-                        image_type="vector"
-                    ))
-                    processed_regions.append((page_num + 1, bbox_tuple))
-
-                except Exception:
-                    continue
-
-        except Exception as e:
-            if self.verbose:
-                print(f"  [警告] 提取矢量图形失败 (页 {page_num + 1}): {e}")
-
-        return images
-
-    def _is_region_overlapping(
-        self, page_num: int, bbox: tuple,
-        processed_regions: list, iou_threshold: float = 0.5
-    ) -> bool:
-        """检查区域是否重叠"""
-        x0, y0, x1, y1 = bbox
-        bbox_area = (x1 - x0) * (y1 - y0)
-
-        for processed_page, processed_bbox in processed_regions:
-            if processed_page != page_num:
+        for idx, img_file in enumerate(sorted(images_dir.glob("*"))):
+            if img_file.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.svg'):
                 continue
 
-            px0, py0, px1, py1 = processed_bbox
-            ix0, iy0 = max(x0, px0), max(y0, py0)
-            ix1, iy1 = min(x1, px1), min(y1, py1)
+            # 生成统一的图片 ID
+            image_id = f"{doc_name}_img_{idx:03d}"
+            dest_path = self.image_output_dir / f"{image_id}{img_file.suffix}"
 
-            if ix0 < ix1 and iy0 < iy1:
-                intersection = (ix1 - ix0) * (iy1 - iy0)
-                processed_area = (px1 - px0) * (py1 - py0)
-                union = bbox_area + processed_area - intersection
-                iou = intersection / union if union > 0 else 0
-                if iou > iou_threshold:
-                    return True
+            # 移动图片到统一目录
+            shutil.copy2(str(img_file), str(dest_path))
 
-        return False
+            # 尝试获取图片尺寸
+            width, height = 0, 0
+            try:
+                from PIL import Image
+                with Image.open(str(dest_path)) as im:
+                    width, height = im.size
+            except Exception:
+                pass
 
-    def _merge_rects(self, rects, threshold=50.0):
-        """合并相近的矩形区域"""
-        if not rects:
-            return []
+            images.append(ImageInfo(
+                image_id=image_id,
+                file_path=str(dest_path),
+                page_num=0,  # MinerU 不直接暴露页码，后续从 content_list 补充
+                bbox=(0, 0, 0, 0),
+                width=width,
+                height=height,
+                image_type="bitmap",
+                caption="",
+            ))
 
-        sorted_rects = sorted(rects, key=lambda r: (r.y0, r.x0))
-        merged = []
+        return images
 
-        for rect in sorted_rects:
-            if not merged:
-                merged.append(rect)
-            else:
-                last = merged[-1]
-                if (abs(rect.y0 - last.y0) < threshold or
-                    abs(rect.y1 - last.y1) < threshold or
-                    rect.intersects(last)):
-                    merged[-1] = last | rect
-                else:
-                    merged.append(rect)
+    def _rewrite_image_paths(self, markdown_content: str, images_dir: Path, doc_name: str) -> str:
+        """将 Markdown 中 MinerU 生成的图片路径替换为统一路径"""
+        if not images_dir.exists():
+            return markdown_content
 
-        return merged
+        # MinerU 输出格式: ![](images/xxx.jpg) 或 ![caption](images/xxx.png)
+        # 建立原始文件名 → 新路径的映射
+        name_map = {}
+        for idx, img_file in enumerate(sorted(images_dir.glob("*"))):
+            if img_file.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.svg'):
+                continue
+            image_id = f"{doc_name}_img_{idx:03d}"
+            new_path = str(self.image_output_dir / f"{image_id}{img_file.suffix}")
+            # 匹配 MinerU 输出的相对路径
+            name_map[img_file.name] = new_path
 
-    def _convert_with_llamaparse(self, pdf_path: str) -> str:
-        """使用 LlamaParse 转换 PDF"""
-        documents = self.llama_parser.load_data(pdf_path)
-        markdown_parts = []
+        def replace_image_ref(match):
+            alt_text = match.group(1)
+            old_path = match.group(2)
+            filename = Path(old_path).name
+            if filename in name_map:
+                return f"![{alt_text}]({name_map[filename]})"
+            return match.group(0)
 
-        for i, doc in enumerate(documents):
-            page_num = doc.metadata.get("page", i + 1)
-            markdown_parts.append(f"\n\n<!-- Page {page_num} -->\n\n")
-            markdown_parts.append(doc.text)
+        # 替换 ![xxx](images/yyy.png) 格式
+        markdown_content = re.sub(
+            r'!\[([^\]]*)\]\(([^)]+)\)',
+            replace_image_ref,
+            markdown_content
+        )
 
-        return "\n\n---\n\n".join(markdown_parts)
+        return markdown_content
 
-    def _convert_with_pymupdf(self, pdf_path: str) -> str:
-        """使用 PyMuPDF 转换 PDF（降级方案）"""
-        doc = fitz.open(pdf_path)
-        markdown_parts = []
+    def _extract_toc_from_markdown(self, markdown_content: str) -> List[TOCItem]:
+        """从 Markdown 标题中提取目录结构"""
+        toc = []
+        lines = markdown_content.split("\n")
 
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            text = page.get_text("text")
-            if text.strip():
-                markdown_parts.append(f"\n\n<!-- Page {page_num + 1} -->\n\n")
-                markdown_parts.append(text)
+        for line in lines:
+            match = re.match(r'^(#{1,6})\s+(.+)$', line.strip())
+            if match:
+                level = len(match.group(1))
+                title = match.group(2).strip()
+                anchor = re.sub(r'[^\w\s-]', '', title.lower())
+                anchor = re.sub(r'[-\s]+', '-', anchor).strip('-')
+                toc.append(TOCItem(
+                    level=level,
+                    title=title,
+                    page_num=0,
+                    anchor=anchor,
+                ))
 
-        doc.close()
-        return "\n\n---\n\n".join(markdown_parts)
+        return toc
+
+    def _extract_doc_info(self, md_dir: Path, doc_name: str, pdf_path: Path) -> Dict:
+        """从 MinerU 输出中提取文档信息"""
+        doc_info = {
+            "title": doc_name,
+            "author": "",
+            "total_pages": 0,
+        }
+
+        # 读取 content_list 获取更多信息
+        content_list_file = md_dir / f"{doc_name}_content_list.json"
+        if content_list_file.exists():
+            try:
+                with open(content_list_file, "r", encoding="utf-8") as f:
+                    content_list = json.load(f)
+                if content_list:
+                    # 从 content_list 获取最大页码
+                    max_page = 0
+                    for item in content_list:
+                        page = item.get("page_idx", 0)
+                        if page > max_page:
+                            max_page = page
+                    doc_info["total_pages"] = max_page + 1
+
+                    # 获取第一个标题作为文档标题
+                    for item in content_list:
+                        if item.get("type") == "text" and item.get("text", "").strip():
+                            doc_info["title"] = item["text"].strip()
+                            break
+            except Exception:
+                pass
+
+        return doc_info
 
 
 class MarkdownParser:
@@ -567,52 +443,6 @@ class MarkdownParser:
         return sections
 
 
-class ImageSectionAssociator:
-    """
-    图片与章节关联器
-    将图片与对应的章节关联
-    """
-
-    def __init__(self, verbose: bool = True):
-        self.verbose = verbose
-
-    def associate(self, sections: List[Section], images: List[ImageInfo]) -> List[Section]:
-        """
-        将图片关联到章节
-
-        策略：
-        1. 根据页码匹配
-        2. 如果一章跨多页，关联所有相关页的图片
-        """
-        if self.verbose:
-            print("[关联] 图片 -> 章节...")
-
-        # 按页码分组图片
-        images_by_page = defaultdict(list)
-        for img in images:
-            images_by_page[img.page_num].append(img)
-
-        # 为每个章节分配图片
-        for i, section in enumerate(sections):
-            section_start_page = section.page_num
-
-            # 确定章节结束页码
-            if i < len(sections) - 1:
-                section_end_page = sections[i + 1].page_num
-            else:
-                section_end_page = max(images_by_page.keys()) if images_by_page else section_start_page
-
-            # 收集该章节范围内的所有图片
-            for page_num in range(section_start_page, section_end_page + 1):
-                section.images.extend(images_by_page.get(page_num, []))
-
-        if self.verbose:
-            total_associated = sum(len(s.images) for s in sections)
-            print(f"  完成: {total_associated} 张图片已关联")
-
-        return sections
-
-
 class UnifiedRAGSystem:
     """
     统一 RAG 系统
@@ -624,16 +454,15 @@ class UnifiedRAGSystem:
     def __init__(
         self,
         qwen_api_key: str,
-        llama_cloud_api_key: Optional[str] = None,
         persist_dir: str = "./unified_index",
         image_output_dir: str = "./output/images",
         llm_model: str = "qwen-flash",
         embedding_model: str = "text-embedding-v4",
         vl_model: str = "qwen-vl-max",
         verbose: bool = True,
+        lang: str = "ch",
     ):
         self.qwen_api_key = qwen_api_key
-        self.llama_cloud_api_key = llama_cloud_api_key
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
         self.image_output_dir = Path(image_output_dir)
@@ -646,12 +475,11 @@ class UnifiedRAGSystem:
 
         # 初始化组件
         self.pdf_converter = PDFToMarkdownConverter(
-            llama_cloud_api_key=llama_cloud_api_key,
             image_output_dir=image_output_dir,
             verbose=verbose,
+            lang=lang,
         )
         self.markdown_parser = MarkdownParser(verbose=verbose)
-        self.image_associator = ImageSectionAssociator(verbose=verbose)
         self.image_descriptor = ImageDescriptor(
             api_key=qwen_api_key,
             model=vl_model
@@ -681,27 +509,24 @@ class UnifiedRAGSystem:
             print("开始处理 PDF")
             print("=" * 60)
 
-        # Step 1: PDF -> Markdown
+        # Step 1: PDF -> Markdown (via MinerU)
         markdown_content, toc, images, doc_info = self.pdf_converter.convert(str(pdf_path))
         self.images = images
 
         # Step 2: Markdown -> 章节
         sections = self.markdown_parser.parse(markdown_content, toc)
 
-        # Step 3: 图文关联
-        sections = self.image_associator.associate(sections, images)
+        # Step 3: 图文关联（将图片分配到对应章节）
+        sections = self._associate_images_to_sections(sections, images, markdown_content)
         self.sections = sections
 
         # Step 4: 生成图片描述
         if generate_descriptions:
             sections = self._generate_image_descriptions(sections)
 
-        # Step 5: 构建最终 Markdown（带图片引用）
-        final_markdown = self._build_final_markdown(sections, toc, doc_info.get("title", pdf_path.stem))
-
-        # 保存 Markdown 文件
+        # Step 5: 保存 Markdown 文件（MinerU 生成的已含图片引用）
         md_path = self.persist_dir / f"{pdf_path.stem}.md"
-        md_path.write_text(final_markdown, encoding="utf-8")
+        md_path.write_text(markdown_content, encoding="utf-8")
 
         return ProcessedDocument(
             source_file=str(pdf_path),
@@ -709,7 +534,7 @@ class UnifiedRAGSystem:
             toc=toc,
             sections=sections,
             images=images,
-            markdown_content=final_markdown,
+            markdown_content=markdown_content,
             metadata={
                 "process_time": datetime.now().isoformat(),
                 "total_pages": doc_info.get("total_pages", 0),
@@ -717,6 +542,43 @@ class UnifiedRAGSystem:
                 "total_sections": len(sections),
             }
         )
+
+    def _associate_images_to_sections(
+        self, sections: List[Section], images: List[ImageInfo], markdown_content: str
+    ) -> List[Section]:
+        """根据 Markdown 内容中的图片引用，将图片关联到对应章节"""
+        if self.verbose:
+            print("[关联] 图片 -> 章节...")
+
+        # 建立图片文件路径到 ImageInfo 的映射
+        path_to_image = {}
+        for img in images:
+            path_to_image[img.file_path] = img
+            # 也用文件名做映射
+            path_to_image[Path(img.file_path).name] = img
+
+        # 扫描每个 section 的内容，查找其中引用的图片
+        img_ref_pattern = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
+
+        for section in sections:
+            refs = img_ref_pattern.findall(section.content)
+            for ref_path in refs:
+                ref_name = Path(ref_path).name
+                img = path_to_image.get(ref_path) or path_to_image.get(ref_name)
+                if img and img not in section.images:
+                    section.images.append(img)
+
+        # 未关联的图片分配给第一个章节
+        associated_ids = {img.image_id for s in sections for img in s.images}
+        unassociated = [img for img in images if img.image_id not in associated_ids]
+        if unassociated and sections:
+            sections[0].images.extend(unassociated)
+
+        if self.verbose:
+            total = sum(len(s.images) for s in sections)
+            print(f"  完成: {total} 张图片已关联")
+
+        return sections
 
     def _generate_image_descriptions(self, sections: List[Section]) -> List[Section]:
         """为章节中的图片生成描述"""
@@ -759,42 +621,6 @@ class UnifiedRAGSystem:
             print(f"  完成: {success_count}/{len(descriptions)} 个描述")
 
         return sections
-
-    def _build_final_markdown(self, sections: List[Section], toc: List[TOCItem], title: str) -> str:
-        """构建最终的 Markdown 内容"""
-        parts = []
-
-        # 文档标题
-        parts.append(f"# {title}\n")
-
-        # 目录
-        if toc:
-            parts.append("## 目录\n")
-            for item in toc:
-                indent = "  " * (item.level - 1)
-                parts.append(f"{indent}- [{item.title}](#{item.anchor})\n")
-            parts.append("\n---\n")
-
-        # 各章节内容
-        for section in sections:
-            parts.append(section.content)
-
-            # 添加图片引用
-            if section.images:
-                parts.append("\n\n**本节图片：**\n")
-                for img in section.images:
-                    rel_path = os.path.relpath(img.file_path, self.persist_dir)
-                    parts.append(f"\n![{img.image_id}]({rel_path})\n")
-
-                    # 添加图片描述（如果有）
-                    if img.image_id in self.image_descriptions:
-                        desc = self.image_descriptions[img.image_id]
-                        if desc.description:
-                            parts.append(f"*{desc.description[:100]}...*\n")
-
-            parts.append("\n\n---\n\n")
-
-        return "\n".join(parts)
 
     def build_index(self, processed_doc: ProcessedDocument) -> VectorStoreIndex:
         """
@@ -1112,7 +938,6 @@ class UnifiedRAGSystem:
 def process_pdf_and_build_index(
     pdf_path: str,
     qwen_api_key: str,
-    llama_cloud_api_key: Optional[str] = None,
     output_dir: str = "./output",
     generate_descriptions: bool = True,
 ) -> UnifiedRAGSystem:
@@ -1122,7 +947,6 @@ def process_pdf_and_build_index(
     Args:
         pdf_path: PDF 文件路径
         qwen_api_key: DashScope API Key
-        llama_cloud_api_key: LlamaCloud API Key（可选）
         output_dir: 输出目录
         generate_descriptions: 是否生成图片描述
 
@@ -1131,7 +955,6 @@ def process_pdf_and_build_index(
     """
     rag_system = UnifiedRAGSystem(
         qwen_api_key=qwen_api_key,
-        llama_cloud_api_key=llama_cloud_api_key,
         persist_dir=f"{output_dir}/index",
         image_output_dir=f"{output_dir}/images",
         verbose=True,
@@ -1157,7 +980,6 @@ if __name__ == "__main__":
 
     # 从环境变量获取 API Key
     qwen_api_key = os.environ.get("QWEN_API_KEY")
-    llama_cloud_api_key = os.environ.get("LLAMA_CLOUD_API_KEY")
 
     if not qwen_api_key:
         print("[错误] 请设置 QWEN_API_KEY 环境变量")
@@ -1167,7 +989,6 @@ if __name__ == "__main__":
     rag = process_pdf_and_build_index(
         pdf_path,
         qwen_api_key=qwen_api_key,
-        llama_cloud_api_key=llama_cloud_api_key,
     )
 
     print("\n" + "=" * 60)
