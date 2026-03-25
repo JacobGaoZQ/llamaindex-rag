@@ -15,19 +15,14 @@ langchain-openai
 langchain-core
 langchain
 
-# LlamaParse (官方文档解析)
-# llama-parse          # 已替换为 MinerU
-
-# MinerU (PDF 转 Markdown)
+# MinerU (PDF 转 Markdown) - 稳定版本
 mineru[core]           # PDF 转 Markdown，支持布局分析、OCR、公式识别
 Pillow                 # 图片尺寸读取
 
 # 文件转换依赖
-# pymupdf4llm        # 已替换为 MinerU
-# PyMuPDF            # 已替换为 MinerU
-mammoth              # Word(docx) 转 Markdown
-python-docx          # Word 备选方案
-pandas               # Excel/CSV 处理
-openpyxl             # Excel 读取
-python-pptx          # PowerPoint 处理
-html2text            # HTML 转 Markdown
+mammoth                # Word(docx) 转 Markdown
+python-docx            # Word 备选方案
+pandas                 # Excel/CSV 处理
+openpyxl               # Excel 读取
+python-pptx            # PowerPoint 处理
+html2text              # HTML 转 Markdown

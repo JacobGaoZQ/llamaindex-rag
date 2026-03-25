@@ -20,6 +20,7 @@ from llama_index.embeddings.dashscope import DashScopeEmbedding
 from llama_index.llms.dashscope import DashScope
 
 from .image_descriptor import ImageDescriptor, ImageDescription
+from .mineru_converter import StableMinerUConverter, MarkdownParser, ProcessedDocument
 
 
 @dataclass
@@ -69,28 +70,12 @@ class ProcessedDocument:
     metadata: Dict[str, Any]
 
 
-class PDFToMarkdownConverter:
-    """
-    使用 MinerU 将 PDF 转换为 Markdown
-    - 自动提取目录结构
-    - 自动提取图片（位图+矢量）
-    - 生成带图片引用的 Markdown
-    """
+# 保留旧类以保证向后兼容，但标记为废弃
+# class PDFToMarkdownConverter 已废弃，请使用 StableMinerUConverter
 
-    def __init__(
-        self,
-        image_output_dir: str = "./output/images",
-        verbose: bool = True,
-        lang: str = "ch",
-        backend: str = "pipeline",
-        parse_method: str = "auto",
-    ):
-        self.image_output_dir = Path(image_output_dir)
-        self.image_output_dir.mkdir(parents=True, exist_ok=True)
-        self.verbose = verbose
-        self.lang = lang
-        self.backend = backend
-        self.parse_method = parse_method
+    # 废弃的方法，保持空实现以保证兼容性
+    def __init__(self, *args, **kwargs):
+        raise DeprecationWarning("PDFToMarkdownConverter 已废弃，请使用 mineru_converter.StableMinerUConverter")
 
     def convert(self, pdf_path: str) -> Tuple[str, List[TOCItem], List[ImageInfo], Dict]:
         """
@@ -473,8 +458,8 @@ class UnifiedRAGSystem:
         self.embedding_model = embedding_model
         self.vl_model = vl_model
 
-        # 初始化组件
-        self.pdf_converter = PDFToMarkdownConverter(
+        # 初始化组件（使用新的稳定转换器）
+        self.pdf_converter = StableMinerUConverter(
             image_output_dir=image_output_dir,
             verbose=verbose,
             lang=lang,
@@ -524,7 +509,7 @@ class UnifiedRAGSystem:
         if generate_descriptions:
             sections = self._generate_image_descriptions(sections)
 
-        # Step 5: 保存 Markdown 文件（MinerU 生成的已含图片引用）
+        # Step 5: 保存 Markdown 文件
         md_path = self.persist_dir / f"{pdf_path.stem}.md"
         md_path.write_text(markdown_content, encoding="utf-8")
 
@@ -622,19 +607,23 @@ class UnifiedRAGSystem:
 
         return sections
 
-    def build_index(self, processed_doc: ProcessedDocument) -> VectorStoreIndex:
+    def build_index(self, processed_docs) -> VectorStoreIndex:
         """
-        构建向量索引
+        构建向量索引（支持单个或多个文档）
 
         Args:
-            processed_doc: 处理后的文档
+            processed_docs: 处理后的文档（单个 ProcessedDocument 或列表）
 
         Returns:
             VectorStoreIndex: 向量索引
         """
+        # 支持单个文档输入
+        if isinstance(processed_docs, ProcessedDocument):
+            processed_docs = [processed_docs]
+            
         if self.verbose:
             print("=" * 60)
-            print("构建向量索引")
+            print(f"构建向量索引（{len(processed_docs)} 个文档）")
             print("=" * 60)
 
         # 配置模型
@@ -649,38 +638,47 @@ class UnifiedRAGSystem:
 
         documents = []
 
-        # 1. 创建文本节点（按章节）
-        for section in processed_doc.sections:
-            if not section.content.strip():
-                continue
+        # 处理每个文档
+        for doc_idx, processed_doc in enumerate(processed_docs):
+            doc_title = processed_doc.title
+            doc_name = Path(processed_doc.source_file).stem
+            if self.verbose:
+                print(f"[{doc_idx+1}/{len(processed_docs)}] 处理文档: {doc_title}")
 
-            # 构建增强文本：章节内容 + 图片描述
-            enhanced_text = section.content
-            image_desc_text = []
+            # 1. 创建文本节点（按章节）
+            for section in processed_doc.sections:
+                if not section.content.strip():
+                    continue
 
-            for desc in section.image_descriptions:
-                if desc.description:
-                    image_desc_text.append(f"【图片描述】{desc.description}")
-                if desc.keywords:
-                    image_desc_text.append(f"【关键词】{', '.join(desc.keywords)}")
+                # 构建增强文本：章节内容 + 图片描述
+                enhanced_text = section.content
+                image_desc_text = []
 
-            if image_desc_text:
-                enhanced_text += "\n\n" + "\n".join(image_desc_text)
+                for desc in section.image_descriptions:
+                    if desc.description:
+                        image_desc_text.append(f"【图片描述】{desc.description}")
+                    if desc.keywords:
+                        image_desc_text.append(f"【关键词】{', '.join(desc.keywords)}")
 
-            doc = Document(
-                text=enhanced_text,
-                doc_id=section.section_id,
-                metadata={
-                    "page_num": section.page_num,
-                    "section_title": section.title,
-                    "section_level": section.level,
-                    "image_ids": ",".join([img.image_id for img in section.images]),
-                    "node_type": "text"
-                },
-                excluded_embed_metadata_keys=["image_ids", "section_level"],
-                excluded_llm_metadata_keys=["image_ids", "section_level"],
-            )
-            documents.append(doc)
+                if image_desc_text:
+                    enhanced_text += "\n\n" + "\n".join(image_desc_text)
+
+                doc = Document(
+                    text=enhanced_text,
+                    doc_id=f"{doc_name}_{section.section_id}",
+                    metadata={
+                        "source_file": processed_doc.source_file,
+                        "doc_title": doc_title,
+                        "page_num": section.page_num,
+                        "section_title": section.title,
+                        "section_level": section.level,
+                        "image_ids": ",".join([img.image_id for img in section.images]),
+                        "node_type": "text"
+                    },
+                    excluded_embed_metadata_keys=["image_ids", "section_level"],
+                    excluded_llm_metadata_keys=["image_ids", "section_level"],
+                )
+                documents.append(doc)
 
         # 2. 创建图片描述节点
         for section in processed_doc.sections:
@@ -700,6 +698,7 @@ class UnifiedRAGSystem:
 
                 desc_text = f"""【图片信息】
 图片ID: {desc.image_id}
+文档标题: {doc_title}
 所在页码: 第 {img_info.page_num} 页
 图片类别: {desc.category}
 
@@ -716,6 +715,8 @@ class UnifiedRAGSystem:
                     text=desc_text,
                     doc_id=f"img_desc_{desc.image_id}",
                     metadata={
+                        "source_file": processed_doc.source_file,
+                        "doc_title": doc_title,
                         "page_num": img_info.page_num,
                         "image_id": desc.image_id,
                         "image_path": img_info.file_path,
@@ -744,12 +745,17 @@ class UnifiedRAGSystem:
         # 4. 保存索引
         index.storage_context.persist(persist_dir=str(self.persist_dir))
 
-        # 保存元数据
+        # 5. 保存元数据
         metadata = {
-            "source_file": processed_doc.source_file,
-            "title": processed_doc.title,
-            "sections": [asdict(s) for s in processed_doc.sections],
-            "images": [asdict(img) for img in processed_doc.images],
+            "documents": [
+                {
+                    "source_file": doc.source_file,
+                    "title": doc.title,
+                    "sections": [asdict(s) for s in doc.sections],
+                    "images": [asdict(img) for img in doc.images],
+                }
+                for doc in processed_docs
+            ],
             "image_descriptions": {k: asdict(v) for k, v in self.image_descriptions.items()},
         }
 

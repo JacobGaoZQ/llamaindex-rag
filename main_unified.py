@@ -103,13 +103,12 @@ def build_knowledge_base(pdf_path: str = None):
         print("[错误] 没有成功处理的文档")
         return None
 
-    # 构建索引（使用最后一个处理的文档）
-    # 注意：当前实现每个 PDF 单独处理，后续可以扩展为合并多个文档
+    # 构建索引（支持多个文档）
     print("\n" + "=" * 60)
     print("构建向量索引")
     print("=" * 60)
 
-    rag_system.build_index(all_processed_docs[-1])
+    rag_system.build_index(all_processed_docs)
 
     # 打印统计信息
     print("\n" + "=" * 60)
