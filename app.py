@@ -1,6 +1,7 @@
 """
-多模态 RAG 系统 Web UI
+增强的多模态 RAG 系统 Web UI
 使用 Streamlit 构建
+支持图片描述生成和智能问答
 """
 import os
 import sys
@@ -12,8 +13,7 @@ import streamlit as st
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.pdf_parser import parse_pdf_directory
-from src.multimodal_query import MultimodalRAGSystem, format_result
+from src.unified_pipeline import UnifiedRAGSystem
 
 
 # 页面配置
@@ -53,50 +53,69 @@ def init_session_state():
 
 
 def build_knowledge_base(api_key: str, data_dir: str):
-    """构建知识库"""
+    """构建知识库（使用 UnifiedRAGSystem，支持 Markdown 生成）"""
     with st.status("正在构建知识库...", expanded=True) as status:
-        st.write("📁 解析 PDF 文档...")
-
-        # 解析 PDF
-        parsed_docs = parse_pdf_directory(
-            input_dir=data_dir,
-            output_dir="./extracted_images",
-            metadata_dir="./parsed_metadata"
-        )
-
-        if not parsed_docs:
-            status.error("未找到可解析的 PDF 文档")
-            return None
-
-        total_text_blocks = sum(len(doc.text_blocks) for doc in parsed_docs)
-        total_images = sum(len(doc.images) for doc in parsed_docs)
-        st.write(f"✅ 解析完成: {total_text_blocks} 个文本块, {total_images} 张图片")
-
-        st.write("🔍 构建向量索引...")
-        rag_system = MultimodalRAGSystem(
-            api_key=api_key,
-            persist_dir="./multimodal_index",
+        # 创建 Unified RAG 系统
+        st.write("🔧 初始化 RAG 系统...")
+        rag_system = UnifiedRAGSystem(
+            qwen_api_key=api_key,
+            persist_dir="./unified_index",
+            image_output_dir="./output/images",
             llm_model="qwen-flash",
-            embedding_model="text-embedding-v4"
+            embedding_model="text-embedding-v4",
+            vl_model="qwen-vl-max"
         )
 
-        rag_system.build_from_documents(parsed_docs)
-
-        status.update(label="✅ 知识库构建完成!", state="complete")
-
-        return rag_system
+        # 处理 data 目录中的所有 PDF
+        st.write("📁 处理 PDF 文档...")
+        pdf_files = list(Path(data_dir).glob("*.pdf"))
+        
+        if not pdf_files:
+            status.error(f"在 {data_dir} 中未找到 PDF 文件")
+            return None
+            
+        st.write(f"找到 {len(pdf_files)} 个 PDF 文件")
+        
+        # 处理第一个 PDF（演示用）
+        pdf_path = pdf_files[0]
+        st.write(f"正在处理: {pdf_path.name}")
+        
+        try:
+            # 处理 PDF 并生成 Markdown
+            processed_doc = rag_system.process_pdf(str(pdf_path), generate_descriptions=True)
+            
+            # 构建向量索引
+            st.write("🔍 构建向量索引...")
+            rag_system.build_index(processed_doc)
+            
+            st.write(f"✅ 处理完成:")
+            st.write(f"   - 标题: {processed_doc.title}")
+            st.write(f"   - 章节数: {len(processed_doc.sections)}")
+            st.write(f"   - 图片数: {len(processed_doc.images)}")
+            st.write(f"   - Markdown 已保存到: ./unified_index/{pdf_path.stem}.md")
+            
+            status.update(label="✅ 知识库构建完成!", state="complete")
+            return rag_system
+            
+        except Exception as e:
+            status.error(f"处理失败: {e}")
+            return None
 
 
 def load_knowledge_base(api_key: str):
     """加载已保存的知识库"""
-    rag_system = MultimodalRAGSystem(
-        api_key=api_key,
-        persist_dir="./multimodal_index",
+    rag_system = UnifiedRAGSystem(
+        qwen_api_key=api_key,
+        persist_dir="./unified_index",
+        image_output_dir="./output/images",
         llm_model="qwen-flash",
-        embedding_model="text-embedding-v4"
+        embedding_model="text-embedding-v4",
+        vl_model="qwen-vl-max"
     )
 
     if rag_system.load_index():
+        stats = rag_system.index.docstore.docs if rag_system.index else {}
+        print(f"加载完成: {len(stats)} 个文档")
         return rag_system
     return None
 
@@ -155,11 +174,22 @@ def main():
         st.markdown("---")
         st.subheader("📊 系统状态")
 
-        if st.session_state.rag_system:
-            stats = st.session_state.rag_system.get_stats()
-            st.metric("总图片数", stats["total_images"])
-            st.metric("总节点数", stats["total_nodes"])
-            st.metric("含图片节点", stats["nodes_with_images"])
+        if st.session_state.rag_system and st.session_state.rag_system.index:
+            # 显示索引统计信息
+            docstore = st.session_state.rag_system.index.docstore.docs
+            total_docs = len(docstore)
+            
+            # 分类统计
+            text_nodes = len([d for d in docstore.values() if d.metadata.get('node_type') != 'image_description'])
+            image_nodes = len([d for d in docstore.values() if d.metadata.get('node_type') == 'image_description'])
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("总节点数", total_docs)
+                st.metric("文本节点", text_nodes)
+            with col_b:
+                st.metric("图片描述节点", image_nodes)
+                st.metric("图片总数", len(st.session_state.rag_system.images) if hasattr(st.session_state.rag_system, 'images') else "N/A")
         else:
             st.info("请先构建或加载知识库")
 
@@ -187,21 +217,42 @@ def main():
                 st.markdown("### 📝 回答")
                 st.write(message["content"])
 
+                # 显示图片描述
+                if message.get("image_descriptions"):
+                    with st.expander("🖼️ 图片描述详情", expanded=False):
+                        for i, desc in enumerate(message["image_descriptions"], 1):
+                            st.markdown(f"**图片 {i}** ({desc.get('category', '未知类别')})")
+                            st.write(desc.get("description", ""))
+                            if desc.get("keywords"):
+                                st.caption(f"关键词: {', '.join(desc['keywords'])}")
+                            st.markdown("---")
+
                 # 显示图片
                 if message.get("images"):
                     st.markdown("### 🖼️ 相关图片")
                     cols = st.columns(min(len(message["images"]), 3))
                     for i, img in enumerate(message["images"]):
                         with cols[i % 3]:
-                            display_image(img["file_path"], width=300)
-                            if img.get("page_num"):
-                                st.caption(f"📄 第 {img['page_num']} 页")
+                            # 构建图片路径
+                            image_path = f"./output/images/{img['image_id']}.png"
+                            if not os.path.exists(image_path):
+                                for ext in ['.png', '.jpg', '.jpeg']:
+                                    test_path = f"./output/images/{img['image_id']}{ext}"
+                                    if os.path.exists(test_path):
+                                        image_path = test_path
+                                        break
+                            
+                            display_image(image_path, width=300)
+                            if img.get("description"):
+                                st.caption(f"📝 {img['description'][:50]}...")
 
                 # 显示来源
                 if message.get("sources"):
                     with st.expander("📚 查看来源"):
                         for source in message["sources"]:
-                            st.write(f"- 页码 {source['page_num']}, 相似度: {source['score']:.3f}")
+                            node_type = source.get('node_type', 'text')
+                            type_label = "🖼️ 图片描述" if node_type == "image_description" else "📄 文本"
+                            st.write(f"- {type_label}: {source['text'][:100]}...")
 
                 # 显示置信度
                 if message.get("confidence"):
@@ -227,35 +278,58 @@ def main():
 
                     # 显示回答
                     st.markdown("### 📝 回答")
-                    st.write(result.text)
+                    st.write(result["text"])
+
+                    # 显示图片描述
+                    if result.get("image_descriptions"):
+                        with st.expander("🖼️ 图片描述详情", expanded=False):
+                            for i, desc in enumerate(result["image_descriptions"], 1):
+                                st.markdown(f"**图片 {i}** ({desc.get('category', '未知类别')})")
+                                st.write(desc.get("description", ""))
+                                if desc.get("keywords"):
+                                    st.caption(f"关键词: {', '.join(desc['keywords'])}")
+                                st.markdown("---")
 
                     # 显示图片
-                    if result.images:
+                    if result.get("images"):
                         st.markdown("### 🖼️ 相关图片")
-                        cols = st.columns(min(len(result.images), 3))
-                        for i, img in enumerate(result.images):
+                        cols = st.columns(min(len(result["images"]), 3))
+                        for i, img in enumerate(result["images"]):
                             with cols[i % 3]:
-                                display_image(img["file_path"], width=300)
-                                if img.get("page_num"):
-                                    st.caption(f"📄 第 {img['page_num']} 页")
+                                # 构建图片路径（相对于 persist_dir）
+                                image_path = f"./output/images/{img['image_id']}.png"
+                                if not os.path.exists(image_path):
+                                    # 尝试其他可能的路径
+                                    for ext in ['.png', '.jpg', '.jpeg']:
+                                        test_path = f"./output/images/{img['image_id']}{ext}"
+                                        if os.path.exists(test_path):
+                                            image_path = test_path
+                                            break
+                                
+                                display_image(image_path, width=300)
+                                if img.get("description"):
+                                    st.caption(f"📝 {img['description'][:50]}...")
 
                     # 显示来源
-                    if result.source_nodes:
+                    if result.get("source_nodes"):
                         with st.expander("📚 查看来源"):
-                            for source in result.source_nodes:
-                                st.write(f"- 页码 {source['page_num']}, 相似度: {source['score']:.3f}")
+                            for source in result["source_nodes"]:
+                                node_type = source.get('node_type', 'text')
+                                type_label = "🖼️ 图片描述" if node_type == "image_description" else "📄 文本"
+                                st.write(f"- {type_label}: {source['text'][:100]}...")
 
                     # 显示置信度
-                    st.progress(result.confidence)
-                    st.caption(f"置信度: {result.confidence:.1%}")
+                    st.progress(result["confidence"])
+                    st.caption(f"置信度: {result['confidence']:.1%}")
 
                     # 保存到历史
                     st.session_state.chat_history.append({
                         "role": "assistant",
-                        "content": result.text,
-                        "images": result.images,
-                        "sources": result.source_nodes,
-                        "confidence": result.confidence
+                        "content": result["text"],
+                        "images": result.get("images", []),
+                        "image_descriptions": result.get("image_descriptions", []),
+                        "sources": result.get("source_nodes", []),
+                        "confidence": result["confidence"]
                     })
 
                 except Exception as e:
