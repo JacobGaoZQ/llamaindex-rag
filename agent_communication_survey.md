@@ -469,8 +469,6 @@ Real-time updates and notifications
 
 ### 6.0 架构对比概览
 
-![Claw生态系统架构对比](images/claw_ecosystem_comparison.png)
-
 **OpenClaw** 和 **ZeroClaw** 构成 Claw AI Agent 生态系统的两大核心实现，分别面向不同场景：
 - **OpenClaw**: 企业级全功能框架，基于 Node.js/Go
 - **ZeroClaw**: 高性能轻量级替代方案，基于 Rust
@@ -722,25 +720,6 @@ OpenClaw 支持通过外部通信平台接入多 Agent 系统：
 
 ---
 
-## 6.3 与其他框架的通信对比
-
-| 特性 | OpenClaw | ZeroClaw | LangChain | AutoGen(AG2) | CrewAI |
-|------|----------|----------|-----------|---------|--------|
-| **通信架构** | 网关中心化 | Channel-based | 图形化路由 | 对话式 | 角色驱动 |
-| **执行确定性** | 高（Lane Queue）| 高（Channel）| 中等 | 中等 | 中等 |
-| **Agent发现** | YAML配置 | TOML配置 | 代码定义 | 代码定义 | YAML配置 |
-| **渠道集成** | 原生支持 | 原生支持 | 需扩展 | 不支持 | 不支持 |
-| **共享内存** | 内置 | SQLite/Vector | LangGraph | 内置 | 内置 |
-| **自托管** | 原生支持 | 原生支持 | 需配置 | 支持 | 支持 |
-| **资源占用** | 中等（200MB+）| 极低（<5MB）| 中等 | 中等 | 中等 |
-| **启动时间** | 1-5秒 | <10ms | 中等 | 中等 | 快 |
-| **MCP支持** | 支持 | 原生支持 | 原生支持 | 原生支持 | 支持 |
-| **A2A支持** | 社区支持 | 社区支持 | 社区支持 | 原生支持 | 原生支持 |
-| **ACP支持** | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
-| **gRPC支持** | 不支持 | 原生支持 | 需扩展 | 需扩展 | 不支持 |
-
----
-
 ## 6.2 ZeroClaw 多Agent通信机制
 
 ![ZeroClaw轻量级架构](images/zeroclaw_architecture.png)
@@ -949,7 +928,7 @@ OpenTelemetry::init("http://jaeger:4317")?;
 
 ---
 
-## 6.4 OpenClaw vs ZeroClaw 深度对比
+## 6.3 OpenClaw vs ZeroClaw 深度对比
 
 ### 6.3.1 架构设计对比
 
@@ -1035,6 +1014,25 @@ OpenTelemetry::init("http://jaeger:4317")?;
 3. **插件系统**: Node.js/Go 插件 → Rust dylib
 4. **内存存储**: 内置 Memory → SQLite/Vector Memory
 5. **监控指标**: 相同 Prometheus/OpenTelemetry 接口
+
+---
+
+## 6.4 Claw 生态系统与其他框架对比
+
+| 特性 | OpenClaw | ZeroClaw | LangChain | AutoGen(AG2) | CrewAI |
+|------|----------|----------|-----------|---------|--------|
+| **通信架构** | 网关中心化 | Channel-based | 图形化路由 | 对话式 | 角色驱动 |
+| **执行确定性** | 高（Lane Queue）| 高（Channel）| 中等 | 中等 | 中等 |
+| **Agent发现** | YAML配置 | TOML配置 | 代码定义 | 代码定义 | YAML配置 |
+| **渠道集成** | 原生支持 | 原生支持 | 需扩展 | 不支持 | 不支持 |
+| **共享内存** | 内置 | SQLite/Vector | LangGraph | 内置 | 内置 |
+| **自托管** | 原生支持 | 原生支持 | 需配置 | 支持 | 支持 |
+| **资源占用** | 中等（200MB+）| 极低（<5MB）| 中等 | 中等 | 中等 |
+| **启动时间** | 1-5秒 | <10ms | 中等 | 中等 | 快 |
+| **MCP支持** | 支持 | 原生支持 | 原生支持 | 原生支持 | 支持 |
+| **A2A支持** | 社区支持 | 社区支持 | 社区支持 | 原生支持 | 原生支持 |
+| **ACP支持** | 不支持 | 不支持 | 不支持 | 不支持 | 不支持 |
+| **gRPC支持** | 不支持 | 原生支持 | 需扩展 | 需扩展 | 不支持 |
 
 ---
 
