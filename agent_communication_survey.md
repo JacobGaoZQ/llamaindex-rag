@@ -1333,11 +1333,16 @@ OpenTelemetry::init("http://jaeger:4317")?;
 
 ### ZeroClaw
 
+- [ZeroClaw GitHub 官方仓库](https://github.com/zeroclaw-labs/zeroclaw)
+- [ZeroClaw 官方文档](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/README.md)
+- [ZeroClaw 架构文档](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/architecture.md)
+- [ZeroClaw 快速入门指南](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/setup-guides/one-click-bootstrap.md)
+- [ZeroClaw CLI 命令参考](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/reference/cli/commands-reference.md)
 - [ZeroClaw Review 2025: Rust-based OpenClaw Alternative - SparkCo AI](https://sparkco.ai/blog/zeroclaw-review-the-rust-based-openclaw-alternative-with-99-smaller-footprint)
 - [ZeroClaw: A Minimal Rust-Based AI Agent Framework - DEV Community](https://dev.to/lightningdev123/zeroclaw-a-minimal-rust-based-ai-agent-framework-for-self-hosted-systems-5593)
+- [Deconstructing ZeroClaw: The Ultra-Lightweight AI Agent Framework](https://onepagecode.substack.com/p/deconstructing-zeroclaw-the-ultra)
+- [OpenClaw vs ZeroClaw: Definitive AI Agent Framework Comparison](https://sparkco.ai/blog/openclaw-vs-zeroclaw-which-ai-agent-framework-should-you-choose-in-2026)
 - [THE CLAW AI AGENT ECOSYSTEM - Medium](https://medium.com/@sanjeeva.bora/the-claw-ai-agent-ecosystem-4a031e4e95aa)
-- [7 Best Lightweight AI Agent Frameworks for 2026 - Waves and Algorithms](https://wavesandalgorithms.com/reviews/zeroclaw)
-- [ZeroClaw AI Agent for Lightweight Automation - LinkedIn](https://www.linkedin.com/posts/bk-han_zeroclaw-onemanarmy-aiautomation-activity-7430488196175757313-gE4S)
 
 ### 安全与认证
 
