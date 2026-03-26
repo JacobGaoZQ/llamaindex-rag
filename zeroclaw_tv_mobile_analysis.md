@@ -398,6 +398,56 @@ NullClaw（Zig 实现）原生支持 A2A v0.3.0，比 ZeroClaw 更轻量：
 
 ---
 
+## 8. 参考资料
+
+### ZeroClaw & NullClaw
+
+- [ZeroClaw GitHub 官方仓库](https://github.com/zeroclaw-labs/zeroclaw)
+- [ZeroClaw 架构文档](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/architecture.md)
+- [ZeroClaw 快速入门指南](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/setup-guides/one-click-bootstrap.md)
+- [ZeroClaw CLI 命令参考](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/reference/cli/commands-reference.md)
+- [ZeroClaw: A Minimal Rust-Based AI Agent Framework](https://dev.to/lightningdev123/zeroclaw-a-minimal-rust-based-ai-agent-framework-for-self-hosted-systems-5593)
+- [NullClaw GitHub 仓库](https://github.com/nullclaw/nullclaw) - 原生支持 A2A v0.3.0 的 Zig 实现
+
+### A2A Protocol
+
+- [A2A Protocol 官方规范](https://a2a-protocol.org/latest/specification/)
+- [Announcing the Agent2Agent Protocol (A2A) - Google](https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/)
+- [A2A GitHub Repository](https://github.com/a2aproject/A2A)
+- [Google Open-Sources Agent2Agent Protocol - InfoQ](https://www.infoq.com/news/2025/04/google-agentic-a2a/)
+
+### OpenClaw
+
+- [OpenClaw Multi-Agent: Subagents, Agent Teams & Orchestration](https://www.meta-intelligence.tech/en/insight-openclaw-multi-agent)
+- [OpenClaw Architecture: Build Production AI Agents](https://pub.towardsai.net/openclaw-architecture-deep-dive-building-production-ready-ai-agents-from-scratch-e693c1002ae8)
+- [Multi-agent orchestration patterns - OpenClaw Issues](https://github.com/openclaw/openclaw/issues/43034)
+
+### 协议对比分析
+
+- [A2A vs MCP vs ACP - Medium](https://dinmaybrahma.medium.com/the-great-ai-agent-protocol-battle-a2a-vs-mcp-vs-acp-8c232811db30)
+- [MCP vs A2A vs ANP vs ACP: Choosing the Right AI Agent Protocol](https://insights.firstaimovers.com/mcp-vs-a2a-vs-anp-vs-acp-choosing-the-right-ai-agent-protocol-70da0b6e10a0)
+- [Comparison of Agent Protocols MCP, ACP and A2A](https://heidloff.net/article/mcp-acp-a2a-agent-protocols/)
+
+### Apple tvOS 开发
+
+- [Apple Developer - Machine Learning & AI](https://developer.apple.com/machine-learning/)
+- [tvOS Developer Documentation](https://developer.apple.com/tvos/)
+- [App Extensions - Apple Developer](https://developer.apple.com/app-extensions/)
+- [The State of Agentic iOS Engineering in 2026](https://dimillian.medium.com/the-state-of-agentic-ios-engineering-in-2026-c5f0cbaa7b34)
+
+### 安全与认证
+
+- [Security in Agentic Communication - Medium](https://medium.com/@adnanmasood/security-in-agentic-communication-threats-controls-standards-and-implementation-patterns-for-bf1eadc94e95)
+- [Best Practices for Agent-to-Agent Authentication](https://prefactor.tech/blog/best-practices-for-agent-to-agent-authentication)
+
+### 架构模式
+
+- [Agent Orchestration Patterns: Swarm vs Mesh vs Hierarchical](https://gurusup.com/blog/agent-orchestration-patterns)
+- [Multi-Agent Architectures - Swarms Framework](https://docs.swarms.world/en/latest/swarms/concept/swarm_architectures/)
+- [The Ultimate Guide to AI Agent Architectures in 2025](https://dev.to/sohail-akbar/the-ultimate-guide-to-ai-agent-architectures-in-2025-2j1c)
+
+---
+
 **文档创建时间**: 2026年3月
 **基于**: agent_communication_survey.md 调研报告 + ZeroClaw/NullClaw 官方文档
 **适用场景**: AI tvOS POC (基于 ZeroClaw)
