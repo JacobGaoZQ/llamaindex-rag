@@ -72,6 +72,7 @@ class StableMinerUConverter:
     """
     稳定的 MinerU 转换器
     使用 MinerU CLI 命令行接口，避免依赖内部模块
+    支持基于 PDF 文件哈希的转换结果缓存，避免重复转换
     """
 
     def __init__(
@@ -80,19 +81,130 @@ class StableMinerUConverter:
         verbose: bool = True,
         lang: str = "ch",
         parse_method: str = "auto",
+        cache_dir: str = "./output/convert_cache",
     ):
         self.image_output_dir = Path(image_output_dir)
         self.image_output_dir.mkdir(parents=True, exist_ok=True)
         self.verbose = verbose
         self.lang = lang
         self.parse_method = parse_method
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def convert(self, pdf_path: str) -> Tuple[str, List[TOCItem], List[ImageInfo], Dict]:
+    def _compute_pdf_hash(self, pdf_path: str) -> str:
+        """计算 PDF 文件的 SHA256 哈希值"""
+        sha256 = hashlib.sha256()
+        with open(pdf_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def _get_cache_path(self, pdf_hash: str) -> Path:
+        """获取缓存元数据文件路径"""
+        return self.cache_dir / f"{pdf_hash}_meta.json"
+
+    def _load_from_cache(self, pdf_path: str) -> Optional[Tuple[str, List[TOCItem], List[ImageInfo], Dict]]:
+        """
+        尝试从缓存加载转换结果
+
+        Returns:
+            缓存命中返回 (markdown_content, toc, images, doc_info)，否则返回 None
+        """
+        pdf_hash = self._compute_pdf_hash(pdf_path)
+        cache_meta_path = self._get_cache_path(pdf_hash)
+
+        if not cache_meta_path.exists():
+            return None
+
+        try:
+            with open(cache_meta_path, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+
+            # 校验缓存版本
+            if cache_data.get("cache_version") != 1:
+                return None
+
+            # 读取缓存的 Markdown 内容
+            cached_md_path = self.cache_dir / cache_data["markdown_file"]
+            if not cached_md_path.exists():
+                return None
+            markdown_content = cached_md_path.read_text(encoding="utf-8")
+
+            # 恢复 TOC
+            toc = [TOCItem(**item) for item in cache_data.get("toc", [])]
+
+            # 恢复图片信息，并校验图片文件是否存在
+            images = []
+            for img_data in cache_data.get("images", []):
+                img_data = dict(img_data)
+                img_data["bbox"] = tuple(img_data["bbox"])
+                img_info = ImageInfo(**img_data)
+                if not Path(img_info.file_path).exists():
+                    if self.verbose:
+                        print(f"  [缓存] 图片文件缺失: {img_info.file_path}，缓存失效")
+                    return None
+                images.append(img_info)
+
+            doc_info = cache_data.get("doc_info", {})
+
+            if self.verbose:
+                print(f"  [缓存] 命中缓存，跳过 MinerU 转换")
+
+            return markdown_content, toc, images, doc_info
+
+        except Exception as e:
+            if self.verbose:
+                print(f"  [缓存] 加载缓存失败: {e}，将重新转换")
+            return None
+
+    def _save_to_cache(
+        self,
+        pdf_path: str,
+        markdown_content: str,
+        toc: List[TOCItem],
+        images: List[ImageInfo],
+        doc_info: Dict,
+    ):
+        """将转换结果保存到缓存"""
+        try:
+            pdf_hash = self._compute_pdf_hash(pdf_path)
+            doc_name = Path(pdf_path).stem
+
+            # 保存 Markdown 内容
+            md_filename = f"{pdf_hash}_{doc_name}.md"
+            md_cache_path = self.cache_dir / md_filename
+            md_cache_path.write_text(markdown_content, encoding="utf-8")
+
+            # 保存元数据
+            cache_data = {
+                "cache_version": 1,
+                "pdf_hash": pdf_hash,
+                "source_file": str(pdf_path),
+                "doc_name": doc_name,
+                "markdown_file": md_filename,
+                "toc": [asdict(item) for item in toc],
+                "images": [asdict(img) for img in images],
+                "doc_info": doc_info,
+            }
+
+            cache_meta_path = self._get_cache_path(pdf_hash)
+            with open(cache_meta_path, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+
+            if self.verbose:
+                print(f"  [缓存] 转换结果已缓存: {cache_meta_path.name}")
+
+        except Exception as e:
+            if self.verbose:
+                print(f"  [缓存] 保存缓存失败: {e}")
+
+    def convert(self, pdf_path: str, force: bool = False) -> Tuple[str, List[TOCItem], List[ImageInfo], Dict]:
         """
         使用 MinerU CLI 转换 PDF 为 Markdown
         
         Args:
             pdf_path: PDF 文件路径
+            force: 是否强制重新转换（忽略缓存）
             
         Returns:
             (markdown_content, toc, images, doc_info)
@@ -105,6 +217,12 @@ class StableMinerUConverter:
 
         if self.verbose:
             print(f"[MinerU] 转换 {pdf_path.name} -> Markdown...")
+
+        # 尝试从缓存加载
+        if not force:
+            cached = self._load_from_cache(str(pdf_path))
+            if cached is not None:
+                return cached
 
         # 使用临时目录
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -148,6 +266,9 @@ class StableMinerUConverter:
             # 7. 提取文档信息
             doc_info = self._extract_doc_info(content_list_file, doc_name, pdf_path)
 
+        # 保存到缓存
+        self._save_to_cache(str(pdf_path), markdown_content, toc, images, doc_info)
+
         if self.verbose:
             print(f"  完成: {len(toc)} 个目录项, {len(images)} 张图片")
 
@@ -184,7 +305,7 @@ class StableMinerUConverter:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=300  # 5分钟超时
+                timeout=1200  # 20分钟超时
             )
             
             if result.returncode != 0:
@@ -196,7 +317,7 @@ class StableMinerUConverter:
             
         except subprocess.TimeoutExpired:
             if self.verbose:
-                print("  [错误] MinerU 执行超时")
+                print("  [错误] MinerU 执行超时（超过20分钟），PDF 可能过大或模型加载缓慢")
             return False
         except FileNotFoundError:
             raise RuntimeError("未找到 mineru 命令，请确保已安装 MinerU")
@@ -501,7 +622,8 @@ def convert_pdf_with_mineru(
     # 1. 转换 PDF
     converter = StableMinerUConverter(
         image_output_dir=image_dir,
-        verbose=True
+        verbose=True,
+        cache_dir=f"{output_dir}/convert_cache",
     )
     
     markdown_content, toc, images, doc_info = converter.convert(pdf_path)

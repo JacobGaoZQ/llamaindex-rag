@@ -1,5 +1,7 @@
 # ZeroClaw 通信范式深度分析 -- TV/移动端部署专题
 
+> ⚠️ **重要澄清**: ZeroClaw + A2A **不是一个插件关系**，而是两种不同的 Agent 通信范式。详见文档末尾的"协议关系说明"章节。
+
 ## 1. ZeroClaw vs 标准 A2A 协议对比
 
 | 维度 | 标准 A2A | ZeroClaw | 核心差异 |
@@ -397,8 +399,68 @@ NullClaw（Zig 实现）原生支持 A2A v0.3.0，比 ZeroClaw 更轻量：
 | **手机关注** | 电池优化、网络切换重连、内存压力应对、隐私合规 |
 
 ---
+## 8. 协议关系说明（重要澄清）
 
-## 8. 参考资料
+### 8.1 ZeroClaw + A2A ≠ 插件关系
+
+**常见误解纠正**：
+很多开发者误以为 ZeroClaw 是 A2A 协议的一个实现或插件，这是不正确的。
+
+### 8.2 两者本质区别
+
+| 维度 | ZeroClaw | A2A Protocol |
+|------|----------|-------------|
+| **性质** | 轻量级 Agent 框架 | 标准化互操作协议 |
+| **主导方** | 社区开源项目 | Google 主导 |
+| **实现方式** | Rust 编写的完整框架 | 协议规范（JSON-RPC） |
+| **部署形态** | 单体可执行文件 | 任意语言实现的协议 |
+
+### 8.3 关系类比
+
+```
+错误理解:
+ZeroClaw ───是───> A2A Plugin
+    ↓              ↗
+  Agent Framework 
+
+正确理解:
+ZeroClaw        A2A Protocol
+    │               │
+    ▼               ▼
+Agent Framework   Protocol Spec
+    │               │
+    └────┬────┬────┘
+         │    │
+    可集成  可桥接
+```
+
+### 8.4 集成方式
+
+如果需要两者协同工作，有三种可行方案：
+
+1. **适配层方案**: 使用 `zeroclaw-a2a` crate 做协议转换
+2. **替代方案**: 使用原生支持 A2A 的 NullClaw（Zig 实现）
+3. **桥接方案**: 边缘用 ZeroClaw，云端用 A2A，中间做协议桥接
+
+详细集成指南见: [`docs/zeroclaw_vs_a2a_integration_guide.md`](./zeroclaw_vs_a2a_integration_guide.md)
+
+### 8.5 选型建议
+
+| 场景 | 推荐方案 | 原因 |
+|------|---------|------|
+| **TV/移动端** | ZeroClaw | 轻量、快速启动、低内存 |
+| **企业级协作** | A2A | 标准化、生态完善 |
+| **混合架构** | ZeroClaw + 桥接 | 边缘轻量 + 云端标准 |
+
+---
+
+## 9. 参考资料
+
+### 本项目相关文档
+
+- [`docs/zeroclaw_vs_a2a_integration_guide.md`](./zeroclaw_vs_a2a_integration_guide.md) - ZeroClaw 与 A2A 协议详细集成指南
+- [`docs/agent_protocol_selection_matrix.md`](./agent_protocol_selection_matrix.md) - 多协议选型决策矩阵
+- [`agent_communication_survey.md`](./agent_communication_survey.md) - Agent 通信协议调研报告
 
 ### ZeroClaw & NullClaw
 

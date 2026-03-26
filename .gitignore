@@ -10,3 +10,7 @@ multimodal_index/
 
 # Streamlit
 .streamlit/
+
+# 运行时输出
+output/
+unified_index/

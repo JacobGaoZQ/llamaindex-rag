@@ -52,7 +52,7 @@ def init_session_state():
         st.session_state.index_built = False
 
 
-def build_knowledge_base(api_key: str, data_dir: str):
+def build_knowledge_base(api_key: str, data_dir: str, generate_descriptions: bool = False):
     """构建知识库（使用 UnifiedRAGSystem，支持 Markdown 生成）"""
     with st.status("正在构建知识库...", expanded=True) as status:
         # 创建 Unified RAG 系统
@@ -82,12 +82,12 @@ def build_knowledge_base(api_key: str, data_dir: str):
         
         try:
             # 处理 PDF 并生成 Markdown
-            processed_doc = rag_system.process_pdf(str(pdf_path), generate_descriptions=True)
+            processed_doc = rag_system.process_pdf(str(pdf_path), generate_descriptions=generate_descriptions)
             
             # 构建向量索引
             st.write("🔍 构建向量索引...")
             rag_system.build_index(processed_doc)
-            
+
             st.write(f"✅ 处理完成:")
             st.write(f"   - 标题: {processed_doc.title}")
             st.write(f"   - 章节数: {len(processed_doc.sections)}")
@@ -143,6 +143,13 @@ def main():
             help="PDF 文档所在目录"
         )
 
+        # 图片描述开关（关闭可大幅提升处理速度）
+        generate_image_desc = st.checkbox(
+            "生成图片描述",
+            value=False,
+            help="使用 VL 模型生成图片描述。关闭可大幅提升处理速度，但仍可检索图片"
+        )
+
         st.markdown("---")
 
         # 知识库操作
@@ -153,7 +160,7 @@ def main():
                 if not api_key:
                     st.error("请先输入 API Key")
                 else:
-                    st.session_state.rag_system = build_knowledge_base(api_key, data_dir)
+                    st.session_state.rag_system = build_knowledge_base(api_key, data_dir, generate_image_desc)
                     if st.session_state.rag_system:
                         st.session_state.index_built = True
 
@@ -233,15 +240,15 @@ def main():
                     cols = st.columns(min(len(message["images"]), 3))
                     for i, img in enumerate(message["images"]):
                         with cols[i % 3]:
-                            # 构建图片路径
-                            image_path = f"./output/images/{img['image_id']}.png"
-                            if not os.path.exists(image_path):
+                            # 优先使用 file_path，回退到按扩展名查找
+                            image_path = img.get("file_path")
+                            if not image_path or not os.path.exists(image_path):
                                 for ext in ['.png', '.jpg', '.jpeg']:
                                     test_path = f"./output/images/{img['image_id']}{ext}"
                                     if os.path.exists(test_path):
                                         image_path = test_path
                                         break
-                            
+
                             display_image(image_path, width=300)
                             if img.get("description"):
                                 st.caption(f"📝 {img['description'][:50]}...")
@@ -296,16 +303,15 @@ def main():
                         cols = st.columns(min(len(result["images"]), 3))
                         for i, img in enumerate(result["images"]):
                             with cols[i % 3]:
-                                # 构建图片路径（相对于 persist_dir）
-                                image_path = f"./output/images/{img['image_id']}.png"
-                                if not os.path.exists(image_path):
-                                    # 尝试其他可能的路径
+                                # 优先使用 file_path，回退到按扩展名查找
+                                image_path = img.get("file_path")
+                                if not image_path or not os.path.exists(image_path):
                                     for ext in ['.png', '.jpg', '.jpeg']:
                                         test_path = f"./output/images/{img['image_id']}{ext}"
                                         if os.path.exists(test_path):
                                             image_path = test_path
                                             break
-                                
+
                                 display_image(image_path, width=300)
                                 if img.get("description"):
                                     st.caption(f"📝 {img['description'][:50]}...")

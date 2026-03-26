@@ -7,6 +7,7 @@ PDF -> MinerU转Markdown(含目录+图片) -> 章节解析 -> 图片描述 -> �
 import os
 import copy
 import json
+import hashlib
 import re
 import shutil
 from pathlib import Path
@@ -68,260 +69,6 @@ class ProcessedDocument:
     images: List[ImageInfo]
     markdown_content: str
     metadata: Dict[str, Any]
-
-
-# 保留旧类以保证向后兼容，但标记为废弃
-# class PDFToMarkdownConverter 已废弃，请使用 StableMinerUConverter
-
-    # 废弃的方法，保持空实现以保证兼容性
-    def __init__(self, *args, **kwargs):
-        raise DeprecationWarning("PDFToMarkdownConverter 已废弃，请使用 mineru_converter.StableMinerUConverter")
-
-    def convert(self, pdf_path: str) -> Tuple[str, List[TOCItem], List[ImageInfo], Dict]:
-        """
-        使用 MinerU 转换 PDF 为 Markdown
-
-        Returns:
-            (markdown_content, toc, images, doc_info)
-        """
-        pdf_path = Path(pdf_path)
-        if not pdf_path.exists():
-            raise FileNotFoundError(f"文件不存在: {pdf_path}")
-
-        doc_name = pdf_path.stem
-
-        if self.verbose:
-            print(f"[MinerU] 转换 {pdf_path.name} -> Markdown...")
-
-        # 1. 使用 MinerU 转换
-        mineru_output_dir = self.image_output_dir.parent / "mineru_temp"
-        mineru_output_dir.mkdir(parents=True, exist_ok=True)
-
-        self._run_mineru(str(pdf_path), str(mineru_output_dir))
-
-        # 2. 读取 MinerU 输出
-        md_dir = mineru_output_dir / doc_name / self.parse_method
-        md_file = md_dir / f"{doc_name}.md"
-        images_dir = md_dir / "images"
-
-        if not md_file.exists():
-            raise RuntimeError(f"MinerU 转换失败，未找到输出: {md_file}")
-
-        markdown_content = md_file.read_text(encoding="utf-8")
-
-        # 3. 提取图片信息并移动到统一目录
-        images = self._collect_images(images_dir, doc_name)
-
-        # 4. 更新 Markdown 中的图片路径为统一路径
-        markdown_content = self._rewrite_image_paths(markdown_content, images_dir, doc_name)
-
-        # 5. 从 Markdown 中提取目录结构
-        toc = self._extract_toc_from_markdown(markdown_content)
-
-        # 6. 读取 content_list 获取文档信息
-        doc_info = self._extract_doc_info(md_dir, doc_name, pdf_path)
-
-        # 7. 清理 MinerU 临时目录
-        shutil.rmtree(mineru_output_dir, ignore_errors=True)
-
-        if self.verbose:
-            print(f"  完成: {len(toc)} 个目录项, {len(images)} 张图片")
-
-        return markdown_content, toc, images, doc_info
-
-    def _run_mineru(self, pdf_path: str, output_dir: str):
-        """调用 MinerU 进行 PDF 转换"""
-        from mineru.cli.common import (
-            convert_pdf_bytes_to_bytes_by_pypdfium2,
-            prepare_env,
-            read_fn,
-        )
-        from mineru.data.data_reader_writer import FileBasedDataWriter
-        from mineru.utils.enum_class import MakeMode
-        from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
-        from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
-        from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
-
-        pdf_name = Path(pdf_path).stem
-        pdf_bytes = read_fn(pdf_path)
-        pdf_bytes = convert_pdf_bytes_to_bytes_by_pypdfium2(pdf_bytes, 0, None)
-
-        # 使用 pipeline 后端进行分析
-        if self.verbose:
-            print(f"  [MinerU] 正在分析文档布局...")
-
-        infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = (
-            pipeline_doc_analyze(
-                [pdf_bytes],
-                [self.lang],
-                parse_method=self.parse_method,
-                formula_enable=True,
-                table_enable=True,
-            )
-        )
-
-        model_list = infer_results[0]
-        images_list = all_image_lists[0]
-        pdf_doc = all_pdf_docs[0]
-        _lang = lang_list[0]
-        _ocr_enable = ocr_enabled_list[0]
-
-        # 准备输出目录
-        local_image_dir, local_md_dir = prepare_env(output_dir, pdf_name, self.parse_method)
-        image_writer = FileBasedDataWriter(local_image_dir)
-        md_writer = FileBasedDataWriter(local_md_dir)
-
-        if self.verbose:
-            print(f"  [MinerU] 正在生成 Markdown...")
-
-        # 生成中间 JSON
-        middle_json = pipeline_result_to_middle_json(
-            model_list, images_list, pdf_doc, image_writer,
-            _lang, _ocr_enable, True
-        )
-
-        pdf_info = middle_json["pdf_info"]
-        image_dir = str(os.path.basename(local_image_dir))
-
-        # 生成 Markdown
-        md_content = pipeline_union_make(pdf_info, MakeMode.MM_MD, image_dir)
-        md_writer.write_string(f"{pdf_name}.md", md_content)
-
-        # 生成 content_list（用于辅助提取信息）
-        content_list = pipeline_union_make(pdf_info, MakeMode.CONTENT_LIST, image_dir)
-        md_writer.write_string(
-            f"{pdf_name}_content_list.json",
-            json.dumps(content_list, ensure_ascii=False, indent=2),
-        )
-
-        if self.verbose:
-            print(f"  [MinerU] 输出目录: {local_md_dir}")
-
-    def _collect_images(self, images_dir: Path, doc_name: str) -> List[ImageInfo]:
-        """收集 MinerU 提取的图片并移动到统一目录"""
-        images = []
-        if not images_dir.exists():
-            return images
-
-        for idx, img_file in enumerate(sorted(images_dir.glob("*"))):
-            if img_file.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.svg'):
-                continue
-
-            # 生成统一的图片 ID
-            image_id = f"{doc_name}_img_{idx:03d}"
-            dest_path = self.image_output_dir / f"{image_id}{img_file.suffix}"
-
-            # 移动图片到统一目录
-            shutil.copy2(str(img_file), str(dest_path))
-
-            # 尝试获取图片尺寸
-            width, height = 0, 0
-            try:
-                from PIL import Image
-                with Image.open(str(dest_path)) as im:
-                    width, height = im.size
-            except Exception:
-                pass
-
-            images.append(ImageInfo(
-                image_id=image_id,
-                file_path=str(dest_path),
-                page_num=0,  # MinerU 不直接暴露页码，后续从 content_list 补充
-                bbox=(0, 0, 0, 0),
-                width=width,
-                height=height,
-                image_type="bitmap",
-                caption="",
-            ))
-
-        return images
-
-    def _rewrite_image_paths(self, markdown_content: str, images_dir: Path, doc_name: str) -> str:
-        """将 Markdown 中 MinerU 生成的图片路径替换为统一路径"""
-        if not images_dir.exists():
-            return markdown_content
-
-        # MinerU 输出格式: ![](images/xxx.jpg) 或 ![caption](images/xxx.png)
-        # 建立原始文件名 → 新路径的映射
-        name_map = {}
-        for idx, img_file in enumerate(sorted(images_dir.glob("*"))):
-            if img_file.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.svg'):
-                continue
-            image_id = f"{doc_name}_img_{idx:03d}"
-            new_path = str(self.image_output_dir / f"{image_id}{img_file.suffix}")
-            # 匹配 MinerU 输出的相对路径
-            name_map[img_file.name] = new_path
-
-        def replace_image_ref(match):
-            alt_text = match.group(1)
-            old_path = match.group(2)
-            filename = Path(old_path).name
-            if filename in name_map:
-                return f"![{alt_text}]({name_map[filename]})"
-            return match.group(0)
-
-        # 替换 ![xxx](images/yyy.png) 格式
-        markdown_content = re.sub(
-            r'!\[([^\]]*)\]\(([^)]+)\)',
-            replace_image_ref,
-            markdown_content
-        )
-
-        return markdown_content
-
-    def _extract_toc_from_markdown(self, markdown_content: str) -> List[TOCItem]:
-        """从 Markdown 标题中提取目录结构"""
-        toc = []
-        lines = markdown_content.split("\n")
-
-        for line in lines:
-            match = re.match(r'^(#{1,6})\s+(.+)$', line.strip())
-            if match:
-                level = len(match.group(1))
-                title = match.group(2).strip()
-                anchor = re.sub(r'[^\w\s-]', '', title.lower())
-                anchor = re.sub(r'[-\s]+', '-', anchor).strip('-')
-                toc.append(TOCItem(
-                    level=level,
-                    title=title,
-                    page_num=0,
-                    anchor=anchor,
-                ))
-
-        return toc
-
-    def _extract_doc_info(self, md_dir: Path, doc_name: str, pdf_path: Path) -> Dict:
-        """从 MinerU 输出中提取文档信息"""
-        doc_info = {
-            "title": doc_name,
-            "author": "",
-            "total_pages": 0,
-        }
-
-        # 读取 content_list 获取更多信息
-        content_list_file = md_dir / f"{doc_name}_content_list.json"
-        if content_list_file.exists():
-            try:
-                with open(content_list_file, "r", encoding="utf-8") as f:
-                    content_list = json.load(f)
-                if content_list:
-                    # 从 content_list 获取最大页码
-                    max_page = 0
-                    for item in content_list:
-                        page = item.get("page_idx", 0)
-                        if page > max_page:
-                            max_page = page
-                    doc_info["total_pages"] = max_page + 1
-
-                    # 获取第一个标题作为文档标题
-                    for item in content_list:
-                        if item.get("type") == "text" and item.get("text", "").strip():
-                            doc_info["title"] = item["text"].strip()
-                            break
-            except Exception:
-                pass
-
-        return doc_info
 
 
 class MarkdownParser:
@@ -446,12 +193,16 @@ class UnifiedRAGSystem:
         vl_model: str = "qwen-vl-max",
         verbose: bool = True,
         lang: str = "ch",
+        cache_dir: str = "./output/convert_cache",
+        **kwargs,
     ):
         self.qwen_api_key = qwen_api_key
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
         self.image_output_dir = Path(image_output_dir)
         self.verbose = verbose
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # 模型配置
         self.llm_model = llm_model
@@ -463,6 +214,7 @@ class UnifiedRAGSystem:
             image_output_dir=image_output_dir,
             verbose=verbose,
             lang=lang,
+            cache_dir=str(self.cache_dir),
         )
         self.markdown_parser = MarkdownParser(verbose=verbose)
         self.image_descriptor = ImageDescriptor(
@@ -475,6 +227,169 @@ class UnifiedRAGSystem:
         self.sections = []
         self.images = []
         self.image_descriptions = {}
+
+    def _compute_pdf_hash(self, pdf_path: str) -> str:
+        """计算 PDF 文件的 SHA256 哈希值"""
+        sha256 = hashlib.sha256()
+        with open(pdf_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def _get_doc_cache_path(self, pdf_hash: str) -> Path:
+        """获取文档级缓存路径"""
+        return self.cache_dir / f"{pdf_hash}_processed.json"
+
+    def _load_processed_doc_cache(self, pdf_path: str, generate_descriptions: bool) -> Optional[ProcessedDocument]:
+        """
+        尝试从缓存加载完整的处理后文档
+
+        Args:
+            pdf_path: PDF 文件路径
+            generate_descriptions: 是否需要图片描述
+
+        Returns:
+            缓存命中返回 ProcessedDocument，否则返回 None
+        """
+        pdf_hash = self._compute_pdf_hash(pdf_path)
+        cache_path = self._get_doc_cache_path(pdf_hash)
+
+        if not cache_path.exists():
+            return None
+
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+
+            if cache_data.get("cache_version") != 1:
+                return None
+
+            # 如果要求图片描述但缓存中没有，则缓存失效
+            if generate_descriptions and not cache_data.get("has_descriptions", False):
+                return None
+
+            # 恢复 TOC
+            toc = [TOCItem(**item) for item in cache_data.get("toc", [])]
+
+            # 恢复图片信息
+            images = []
+            for img_data in cache_data.get("images", []):
+                img_data = dict(img_data)
+                img_data["bbox"] = tuple(img_data["bbox"])
+                img_info = ImageInfo(**img_data)
+                if not Path(img_info.file_path).exists():
+                    if self.verbose:
+                        print(f"  [文档缓存] 图片文件缺失: {img_info.file_path}，缓存失效")
+                    return None
+                images.append(img_info)
+
+            # 恢复章节
+            sections = []
+            for sec_data in cache_data.get("sections", []):
+                sec_images = []
+                for sid in sec_data.get("images", []):
+                    sid = dict(sid)
+                    sid["bbox"] = tuple(sid["bbox"])
+                    sec_images.append(ImageInfo(**sid))
+
+                sec_descs = []
+                for desc_data in sec_data.get("image_descriptions", []):
+                    sec_descs.append(ImageDescription(**desc_data))
+
+                sections.append(Section(
+                    section_id=sec_data["section_id"],
+                    level=sec_data["level"],
+                    title=sec_data["title"],
+                    content=sec_data["content"],
+                    page_num=sec_data["page_num"],
+                    anchor=sec_data["anchor"],
+                    images=sec_images,
+                    image_descriptions=sec_descs,
+                ))
+
+            # 恢复图片描述映射
+            self.image_descriptions = {
+                k: ImageDescription(**v)
+                for k, v in cache_data.get("image_descriptions_map", {}).items()
+            }
+            self.images = images
+            self.sections = sections
+
+            # 读取 Markdown 内容（优先从缓存文件，回退到 persist_dir）
+            markdown_content = ""
+            cached_md_file = cache_data.get("markdown_file")
+            if cached_md_file:
+                cached_md_path = self.cache_dir / cached_md_file
+                if cached_md_path.exists():
+                    markdown_content = cached_md_path.read_text(encoding="utf-8")
+
+            if not markdown_content:
+                md_path = self.persist_dir / f"{Path(pdf_path).stem}.md"
+                if md_path.exists():
+                    markdown_content = md_path.read_text(encoding="utf-8")
+
+            if not markdown_content:
+                if self.verbose:
+                    print(f"  [文档缓存] Markdown 内容缺失，缓存失效")
+                return None
+
+            if self.verbose:
+                print(f"  [文档缓存] 命中缓存，跳过全部处理流程")
+
+            return ProcessedDocument(
+                source_file=str(pdf_path),
+                title=cache_data.get("title", Path(pdf_path).stem),
+                toc=toc,
+                sections=sections,
+                images=images,
+                markdown_content=markdown_content,
+                metadata=cache_data.get("metadata", {}),
+            )
+
+        except Exception as e:
+            if self.verbose:
+                print(f"  [文档缓存] 加载失败: {e}，将重新处理")
+            return None
+
+    def _save_processed_doc_cache(
+        self, pdf_path: str, doc: ProcessedDocument, has_descriptions: bool
+    ):
+        """将处理后的文档保存到缓存"""
+        try:
+            pdf_hash = self._compute_pdf_hash(pdf_path)
+            doc_name = Path(pdf_path).stem
+
+            # 单独保存 Markdown 内容（避免 JSON 过大）
+            md_filename = f"{pdf_hash}_{doc_name}_processed.md"
+            md_cache_path = self.cache_dir / md_filename
+            md_cache_path.write_text(doc.markdown_content, encoding="utf-8")
+
+            cache_data = {
+                "cache_version": 1,
+                "pdf_hash": pdf_hash,
+                "source_file": str(pdf_path),
+                "title": doc.title,
+                "has_descriptions": has_descriptions,
+                "markdown_file": md_filename,
+                "toc": [asdict(item) for item in doc.toc],
+                "images": [asdict(img) for img in doc.images],
+                "sections": [asdict(sec) for sec in doc.sections],
+                "image_descriptions_map": {
+                    k: asdict(v) for k, v in self.image_descriptions.items()
+                },
+                "metadata": doc.metadata,
+            }
+
+            cache_path = self._get_doc_cache_path(pdf_hash)
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+
+            if self.verbose:
+                print(f"  [文档缓存] 已保存: {cache_path.name}")
+
+        except Exception as e:
+            if self.verbose:
+                print(f"  [文档缓存] 保存失败: {e}")
 
     def process_pdf(self, pdf_path: str, generate_descriptions: bool = True) -> ProcessedDocument:
         """
@@ -493,6 +408,15 @@ class UnifiedRAGSystem:
             print("=" * 60)
             print("开始处理 PDF")
             print("=" * 60)
+
+        # 尝试从文档级缓存加载
+        cached_doc = self._load_processed_doc_cache(str(pdf_path), generate_descriptions)
+        if cached_doc is not None:
+            # 确保 Markdown 文件存在
+            md_path = self.persist_dir / f"{pdf_path.stem}.md"
+            if not md_path.exists() and cached_doc.markdown_content:
+                md_path.write_text(cached_doc.markdown_content, encoding="utf-8")
+            return cached_doc
 
         # Step 1: PDF -> Markdown (via MinerU)
         markdown_content, toc, images, doc_info = self.pdf_converter.convert(str(pdf_path))
@@ -513,7 +437,7 @@ class UnifiedRAGSystem:
         md_path = self.persist_dir / f"{pdf_path.stem}.md"
         md_path.write_text(markdown_content, encoding="utf-8")
 
-        return ProcessedDocument(
+        processed_doc = ProcessedDocument(
             source_file=str(pdf_path),
             title=doc_info.get("title", pdf_path.stem),
             toc=toc,
@@ -527,6 +451,11 @@ class UnifiedRAGSystem:
                 "total_sections": len(sections),
             }
         )
+
+        # 保存到文档级缓存
+        self._save_processed_doc_cache(str(pdf_path), processed_doc, generate_descriptions)
+
+        return processed_doc
 
     def _associate_images_to_sections(
         self, sections: List[Section], images: List[ImageInfo], markdown_content: str
@@ -607,7 +536,61 @@ class UnifiedRAGSystem:
 
         return sections
 
-    def build_index(self, processed_docs) -> VectorStoreIndex:
+    def _is_index_valid(self, processed_docs: list) -> bool:
+        """
+        检查已有索引是否与当前文档集一致（通过比对 PDF 文件哈希）
+
+        Returns:
+            True 表示索引有效可复用，False 表示需要重建
+        """
+        index_hash_path = self.persist_dir / "index_source_hashes.json"
+        if not index_hash_path.exists():
+            return False
+
+        # 检查向量索引文件是否存在
+        if not (self.persist_dir / "default__vector_store.json").exists():
+            return False
+
+        try:
+            with open(index_hash_path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+
+            saved_hashes = saved.get("source_hashes", {})
+            if not saved_hashes:
+                return False
+
+            # 对比每个源文件的哈希
+            current_files = {doc.source_file for doc in processed_docs}
+            if current_files != set(saved_hashes.keys()):
+                return False
+
+            for doc in processed_docs:
+                current_hash = self._compute_pdf_hash(doc.source_file)
+                if saved_hashes.get(doc.source_file) != current_hash:
+                    return False
+
+            return True
+
+        except Exception as e:
+            if self.verbose:
+                print(f"  [索引校验] 读取失败: {e}")
+            return False
+
+    def _save_index_hashes(self, processed_docs: list):
+        """保存构建索引所用 PDF 文件的哈希值"""
+        try:
+            hashes = {
+                doc.source_file: self._compute_pdf_hash(doc.source_file)
+                for doc in processed_docs
+            }
+            index_hash_path = self.persist_dir / "index_source_hashes.json"
+            with open(index_hash_path, "w", encoding="utf-8") as f:
+                json.dump({"source_hashes": hashes}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            if self.verbose:
+                print(f"  [索引校验] 保存哈希失败: {e}")
+
+    def build_index(self, processed_docs, force: bool = False) -> VectorStoreIndex:
         """
         构建向量索引（支持单个或多个文档）
 
@@ -620,11 +603,22 @@ class UnifiedRAGSystem:
         # 支持单个文档输入
         if isinstance(processed_docs, ProcessedDocument):
             processed_docs = [processed_docs]
-            
+
         if self.verbose:
             print("=" * 60)
             print(f"构建向量索引（{len(processed_docs)} 个文档）")
             print("=" * 60)
+
+        # 校验已有索引是否有效，有效则直接加载，跳过 Embedding
+        if not force and self._is_index_valid(processed_docs):
+            if self.verbose:
+                print("  [索引缓存] PDF 未变化，加载已有索引，跳过 Embedding...")
+            if self.load_index():
+                if self.verbose:
+                    print("  [索引缓存] 已有索引加载成功")
+                return self.index
+            if self.verbose:
+                print("  [索引缓存] 加载失败，重新构建...")
 
         # 配置模型
         embed_model = DashScopeEmbedding(
@@ -745,7 +739,10 @@ class UnifiedRAGSystem:
         # 4. 保存索引
         index.storage_context.persist(persist_dir=str(self.persist_dir))
 
-        # 5. 保存元数据
+        # 5. 保存索引来源哈希（用于下次校验）
+        self._save_index_hashes(processed_docs)
+
+        # 6. 保存元数据
         metadata = {
             "documents": [
                 {
@@ -795,6 +792,14 @@ class UnifiedRAGSystem:
             if metadata_path.exists():
                 with open(metadata_path, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
+
+                # 恢复图片列表
+                self.images = []
+                for doc_data in metadata.get("documents", []):
+                    for img_data in doc_data.get("images", []):
+                        img_data = dict(img_data)
+                        img_data["bbox"] = tuple(img_data["bbox"])
+                        self.images.append(ImageInfo(**img_data))
 
                 # 恢复图片描述
                 self.image_descriptions = {
@@ -853,7 +858,8 @@ class UnifiedRAGSystem:
                 else:
                     text_nodes.append(node)
 
-        # 收集图片
+        # 收集图片（建立 image_id -> ImageInfo 的查找表）
+        img_info_map = {img.image_id: img for img in self.images}
         all_images = []
         seen_image_ids = set()
 
@@ -863,7 +869,11 @@ class UnifiedRAGSystem:
             image_ids = [i for i in image_ids_str.split(",") if i] if image_ids_str else []
             for img_id in image_ids:
                 if img_id not in seen_image_ids:
-                    img_data = {"image_id": img_id}
+                    img_info = img_info_map.get(img_id)
+                    img_data = {
+                        "image_id": img_id,
+                        "file_path": img_info.file_path if img_info else None,
+                    }
                     if img_id in self.image_descriptions:
                         desc = self.image_descriptions[img_id]
                         img_data["description"] = desc.description
@@ -876,7 +886,11 @@ class UnifiedRAGSystem:
             metadata = node.node.metadata if hasattr(node.node, 'metadata') else {}
             image_id = metadata.get("image_id")
             if image_id and image_id not in seen_image_ids:
-                img_data = {"image_id": image_id}
+                img_info = img_info_map.get(image_id)
+                img_data = {
+                    "image_id": image_id,
+                    "file_path": img_info.file_path if img_info else metadata.get("image_path"),
+                }
                 if image_id in self.image_descriptions:
                     desc = self.image_descriptions[image_id]
                     img_data["description"] = desc.description

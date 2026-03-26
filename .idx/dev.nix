@@ -22,9 +22,9 @@
       enable = true;
       previews = {
         web = {
-          command = [ "./devserver.sh" ];
+          command = [ "./run_ui.sh" ];
           env = { PORT = "$PORT"; };
-          manager = "web";
+          manager = "process";
         };
       };
     };
