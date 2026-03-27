@@ -465,7 +465,7 @@ Agent Framework   Protocol Spec
 ### ZeroClaw & NullClaw
 
 - [ZeroClaw GitHub 官方仓库](https://github.com/zeroclaw-labs/zeroclaw)
-- [ZeroClaw 架构文档](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/architecture.md)
+- [ZeroClaw 架构文档](https://github.com/zeroclaw-labs/zeroclaw/tree/master/docs/architecture)
 - [ZeroClaw 快速入门指南](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/setup-guides/one-click-bootstrap.md)
 - [ZeroClaw CLI 命令参考](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/reference/cli/commands-reference.md)
 - [ZeroClaw: A Minimal Rust-Based AI Agent Framework](https://dev.to/lightningdev123/zeroclaw-a-minimal-rust-based-ai-agent-framework-for-self-hosted-systems-5593)
