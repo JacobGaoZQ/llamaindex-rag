@@ -1266,15 +1266,18 @@ for (agents) |agent| {
 
 ### 12.1 相关项目
 
-- [`zeroclaw-a2a`](https://github.com/community/zeroclaw-a2a) - ZeroClaw 到 A2A 的适配器（推荐）
-- [`a2a-rust`](https://github.com/a2aproject/a2a-rust) - A2A 协议的 Rust 实现
+- [`zeroclaw`](https://github.com/zeroclaw-labs/zeroclaw) - ZeroClaw 核心框架（官方仓库）
+- [`a2a-rs`](https://github.com/EmilLindfors/a2a-rs) - A2A 协议的 Rust 实现
 - [`nullclaw`](https://github.com/nullclaw/nullclaw) - 原生支持 A2A 的 Zig 框架
+- [`ra2a`](https://github.com/qntx/ra2a) - Rust SDK for A2A Protocol
+- [`acai`](https://github.com/rescrv/acai) - A2A 协议的完整 Rust 框架实现
 
 ### 12.2 学习资源
 
-- [A2A Protocol 官方文档](https://a2a-protocol.org/latest/specification/)
-- [ZeroClaw 架构深度解析](https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/architecture.md)
-- [Agent 通信协议对比研究](https://arxiv.org/abs/2504.12345)
+- [A2A Protocol 官方文档](https://github.com/a2aproject/A2A) - A2A 项目官方仓库
+- [ZeroClaw 官方文档](https://github.com/zeroclaw-labs/zeroclaw/tree/master/docs) - ZeroClaw 架构和技术文档
+- [Agent 通信协议研究](https://github.com/zeroclaw-labs/zeroclaw/issues) - 相关技术讨论和 Issues
+- [Zig 语言官方文档](https://ziglang.org/documentation/master/) - NullClaw 开发语言参考
 
 ---
 **文档版本**: 2.0  
