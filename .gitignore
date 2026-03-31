@@ -14,3 +14,6 @@ multimodal_index/
 # 运行时输出
 output/
 unified_index/
+
+# Google IDX
+.idx/
