@@ -42,6 +42,115 @@ def display_image(image_path: str, width: int = 400):
         st.warning(f"图片文件不存在: {image_path}")
 
 
+def get_image_path(img: dict) -> str:
+    """获取图片的完整路径"""
+    # 优先使用 file_path，回退到按扩展名查找
+    image_path = img.get("file_path")
+    if image_path and os.path.exists(image_path):
+        return image_path
+
+    # 尝试按 image_id 查找
+    image_id = img.get("image_id")
+    if image_id:
+        for ext in ['.png', '.jpg', '.jpeg']:
+            test_path = f"./output/images/{image_id}{ext}"
+            if os.path.exists(test_path):
+                return test_path
+
+    return None
+
+
+def _render_image_card(img: dict):
+    """渲染单张图片卡片"""
+    image_path = get_image_path(img)
+    if not image_path:
+        return
+    st.markdown("---")
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        display_image(image_path, width=280)
+    with col2:
+        st.markdown("**📷 图片**")
+        if img.get("description"):
+            st.write(img["description"])
+        if img.get("keywords"):
+            st.caption(f"关键词: {', '.join(img['keywords'])}")
+    st.markdown("---")
+
+
+def _compute_relevance_score(text: str, img: dict) -> int:
+    """计算文本与图片的相关性分数"""
+    import re
+    text_lower = text.lower()
+    desc = (img.get("description") or "").lower()
+    keywords = [k.lower() for k in (img.get("keywords") or [])]
+    img_id = (img.get("image_id") or "").lower()
+
+    score = 0
+    if img_id in text_lower:
+        score += 10
+    for kw in keywords:
+        if kw in text_lower:
+            score += 3
+    desc_words = [w for w in re.findall(r'[\u4e00-\u9fa5a-zA-Z0-9]+', desc) if len(w) > 1][:10]
+    for w in desc_words:
+        if w in text_lower:
+            score += 1
+    return score
+
+
+def display_answer_with_images(answer_text: str, images: list, image_descriptions: dict):
+    """将回答文本中的图片标记替换为实际图片展示，严格按 LLM 标记位置渲染"""
+    import re
+
+    img_pattern = re.compile(r'\[图片[:：]\s*([^\]]+)\]')
+    seen_image_ids = set()
+
+    # 建立 image_id -> img 的精确映射
+    img_map = {}
+    for img in images:
+        img_id = img.get("image_id")
+        if img_id:
+            img_map[img_id] = img
+
+    # 将文本按段落分割，但保留段落内的图片标记
+    raw_paragraphs = [p for p in re.split(r'\n\n+', answer_text) if p.strip()]
+    blocks = []
+
+    for para in raw_paragraphs:
+        parts = img_pattern.split(para)
+        if len(parts) == 1:
+            blocks.append(("text", para.strip()))
+        else:
+            for i, part in enumerate(parts):
+                if i % 2 == 0:
+                    if part.strip():
+                        blocks.append(("text", part.strip()))
+                else:
+                    blocks.append(("image_ref", part.strip()))
+
+    # 遍历 blocks 显示内容：只渲染 LLM 显式引用的图片
+    for block_type, content in blocks:
+        if block_type == "text":
+            st.write(content)
+        else:
+            img_ref = content
+            matched_img = img_map.get(img_ref)
+            # 如果精确匹配不到，尝试部分匹配（但只匹配一次）
+            if not matched_img:
+                for img_id, img in img_map.items():
+                    if img_ref in img_id:
+                        matched_img = img
+                        break
+            if matched_img:
+                img_id = matched_img.get("image_id")
+                if img_id and img_id not in seen_image_ids:
+                    _render_image_card(matched_img)
+                    seen_image_ids.add(img_id)
+                    if img.get("description"):
+                        st.caption(f"📝 {img['description'][:60]}...")
+
+
 def init_session_state():
     """初始化会话状态"""
     if "rag_system" not in st.session_state:
@@ -220,38 +329,23 @@ def main():
             if message["role"] == "user":
                 st.write(message["content"])
             else:
-                # 显示回答
+                # 显示回答（带图片交错展示）
                 st.markdown("### 📝 回答")
-                st.write(message["content"])
+                display_answer_with_images(
+                    message["content"],
+                    message.get("images", []),
+                    {d["image_id"]: d for d in message.get("image_descriptions", [])}
+                )
 
-                # 显示图片描述
+                # 显示图片描述详情（折叠）
                 if message.get("image_descriptions"):
-                    with st.expander("🖼️ 图片描述详情", expanded=False):
+                    with st.expander("🖼️ 查看所有图片描述详情", expanded=False):
                         for i, desc in enumerate(message["image_descriptions"], 1):
                             st.markdown(f"**图片 {i}** ({desc.get('category', '未知类别')})")
                             st.write(desc.get("description", ""))
                             if desc.get("keywords"):
                                 st.caption(f"关键词: {', '.join(desc['keywords'])}")
                             st.markdown("---")
-
-                # 显示图片
-                if message.get("images"):
-                    st.markdown("### 🖼️ 相关图片")
-                    cols = st.columns(min(len(message["images"]), 3))
-                    for i, img in enumerate(message["images"]):
-                        with cols[i % 3]:
-                            # 优先使用 file_path，回退到按扩展名查找
-                            image_path = img.get("file_path")
-                            if not image_path or not os.path.exists(image_path):
-                                for ext in ['.png', '.jpg', '.jpeg']:
-                                    test_path = f"./output/images/{img['image_id']}{ext}"
-                                    if os.path.exists(test_path):
-                                        image_path = test_path
-                                        break
-
-                            display_image(image_path, width=300)
-                            if img.get("description"):
-                                st.caption(f"📝 {img['description'][:50]}...")
 
                 # 显示来源
                 if message.get("sources"):
@@ -283,38 +377,23 @@ def main():
                 try:
                     result = st.session_state.rag_system.query(prompt)
 
-                    # 显示回答
+                    # 显示回答（带图片交错展示）
                     st.markdown("### 📝 回答")
-                    st.write(result["text"])
+                    display_answer_with_images(
+                        result["text"],
+                        result.get("images", []),
+                        {d["image_id"]: d for d in result.get("image_descriptions", [])}
+                    )
 
-                    # 显示图片描述
+                    # 显示图片描述详情（折叠）
                     if result.get("image_descriptions"):
-                        with st.expander("🖼️ 图片描述详情", expanded=False):
+                        with st.expander("🖼️ 查看所有图片描述详情", expanded=False):
                             for i, desc in enumerate(result["image_descriptions"], 1):
                                 st.markdown(f"**图片 {i}** ({desc.get('category', '未知类别')})")
                                 st.write(desc.get("description", ""))
                                 if desc.get("keywords"):
                                     st.caption(f"关键词: {', '.join(desc['keywords'])}")
                                 st.markdown("---")
-
-                    # 显示图片
-                    if result.get("images"):
-                        st.markdown("### 🖼️ 相关图片")
-                        cols = st.columns(min(len(result["images"]), 3))
-                        for i, img in enumerate(result["images"]):
-                            with cols[i % 3]:
-                                # 优先使用 file_path，回退到按扩展名查找
-                                image_path = img.get("file_path")
-                                if not image_path or not os.path.exists(image_path):
-                                    for ext in ['.png', '.jpg', '.jpeg']:
-                                        test_path = f"./output/images/{img['image_id']}{ext}"
-                                        if os.path.exists(test_path):
-                                            image_path = test_path
-                                            break
-
-                                display_image(image_path, width=300)
-                                if img.get("description"):
-                                    st.caption(f"📝 {img['description'][:50]}...")
 
                     # 显示来源
                     if result.get("source_nodes"):

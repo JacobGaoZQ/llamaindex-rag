@@ -277,53 +277,90 @@ class StableMinerUConverter:
     def _run_mineru_cli(self, pdf_path: str, output_dir: str) -> bool:
         """调用 MinerU CLI 命令"""
         try:
-            # MinerU CLI 命令路径
-            mineru_path = "/home/codespace/.local/lib/python3.12/site-packages/bin/mineru"
-            
-            # 检查命令是否存在
-            if not os.path.exists(mineru_path):
-                # 尝试在 PATH 中查找
-                import shutil
+            # 尝试查找 magic-pdf 命令 (MinerU 3.0+ 使用 magic-pdf)
+            import shutil
+            import sys
+
+            # 首先尝试在当前虚拟环境中查找
+            venv_bin = Path(sys.executable).parent
+            magic_pdf_path = str(venv_bin / "magic-pdf")
+
+            if not Path(magic_pdf_path).exists():
+                # 尝试使用 shutil.which 在 PATH 中查找
+                magic_pdf_path = shutil.which("magic-pdf")
+
+            if not magic_pdf_path:
+                # 尝试查找 mineru 命令 (旧版本)
                 mineru_path = shutil.which("mineru")
-                if not mineru_path:
-                    raise FileNotFoundError("未找到 mineru 命令")
-            
-            # MinerU CLI 命令（使用正确的参数）
+                if mineru_path:
+                    return self._run_mineru_legacy(pdf_path, output_dir, mineru_path)
+                raise FileNotFoundError("未找到 magic-pdf 或 mineru 命令")
+
+            # MinerU 3.0+ 使用 magic-pdf 命令
             cmd = [
-                mineru_path,
+                magic_pdf_path,
                 "-p", pdf_path,           # --path
                 "-o", output_dir,         # --output
                 "-l", self.lang,          # --lang
                 "-m", self.parse_method,  # --method
-                "-b", "pipeline",         # --backend
             ]
-            
+
             if self.verbose:
                 print(f"  执行命令: {' '.join(cmd)}")
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=1200  # 20分钟超时
             )
-            
+
             if result.returncode != 0:
                 if self.verbose:
                     print(f"  MinerU 错误输出: {result.stderr}")
                 return False
-                
+
             return True
-            
+
         except subprocess.TimeoutExpired:
             if self.verbose:
                 print("  [错误] MinerU 执行超时（超过20分钟），PDF 可能过大或模型加载缓慢")
             return False
-        except FileNotFoundError:
-            raise RuntimeError("未找到 mineru 命令，请确保已安装 MinerU")
+        except FileNotFoundError as e:
+            raise RuntimeError(f"{e}，请确保已安装 MinerU: pip install mineru")
         except Exception as e:
             if self.verbose:
                 print(f"  [错误] 执行 MinerU 失败: {e}")
+            return False
+
+    def _run_mineru_legacy(self, pdf_path: str, output_dir: str, mineru_path: str) -> bool:
+        """调用旧版 MinerU CLI 命令"""
+        try:
+            cmd = [
+                mineru_path,
+                "-p", pdf_path,
+                "-o", output_dir,
+                "-l", self.lang,
+                "-m", self.parse_method,
+                "-b", "pipeline",
+            ]
+
+            if self.verbose:
+                print(f"  执行命令: {' '.join(cmd)}")
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=1200
+            )
+
+            return result.returncode == 0
+
+        except Exception as e:
+            if self.verbose:
+                print(f"  [错误] 执行 MinerU 失败: {e}")
+            return False
             return False
 
     def _collect_images(

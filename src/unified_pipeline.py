@@ -841,6 +841,102 @@ class UnifiedRAGSystem:
                 print(f"加载索引失败: {e}")
             return False
 
+    def _extract_markdown_section(self, md_path: Path, section_keywords: List[str]) -> str:
+        """
+        从 Markdown 文件中提取包含指定关键词的完整章节内容。
+        用于补充向量检索中被拆散的章节，确保 LLM 获得完整上下文。
+        """
+        if not md_path.exists():
+            return ""
+
+        content = md_path.read_text(encoding="utf-8")
+        lines = content.split("\n")
+
+        # 查找匹配的行
+        best_start = -1
+        best_title = ""
+        for i, line in enumerate(lines):
+            # 匹配一级或二级标题
+            if line.startswith("# ") or line.startswith("## "):
+                title = line.lstrip("# ").strip()
+                for kw in section_keywords:
+                    if kw in title:
+                        if best_start == -1 or len(title) < len(best_title):
+                            best_start = i
+                            best_title = title
+
+        if best_start == -1:
+            return ""
+
+        # 确定提取范围：从匹配标题到下一个不相关的同级或更高级标题
+        continuation_keywords = set(section_keywords + [
+            "步骤", "注意", "警示", "警告", "调整", "拆卸", "安装",
+            "位置", "地面", "门端差", "初始设置", "最终检查", "NOTE",
+            "需要", "工具", "分离", "固定", "连接", "卡环",
+        ])
+
+        end = len(lines)
+        initial_level = lines[best_start].find(" ")  # # 后面第一个空格的位置即标题级别
+
+        for i in range(best_start + 1, len(lines)):
+            line = lines[i]
+            if line.startswith("# "):
+                title = line.lstrip("# ").strip()
+                # 如果标题不包含任何延续关键词，则视为章节结束
+                if not any(kw in title for kw in continuation_keywords):
+                    end = i
+                    break
+
+        section_text = "\n".join(lines[best_start:end]).strip()
+        return section_text
+
+    def _get_complete_section_context(self, query_text: str, text_nodes: list) -> List[str]:
+        """
+        根据查询意图，从原始 Markdown 文件中提取完整章节作为补充上下文。
+        """
+        import re
+
+        query_lower = query_text.lower()
+        extra_contexts = []
+        processed_files = set()
+
+        # 定义查询意图到章节关键词的映射
+        intent_map = [
+            (["安装步骤", "怎么安装", "如何安装", "安装方法", "装冰箱"], ["安装步骤"]),
+            (["拆卸冰箱门", "拆门", "门太大"], ["拆卸冰箱门方便进出", "拆卸冰箱门"]),
+            (["安全信息", "安全注意", "警告", "警示"], ["安全信息", "安全说明须知", "重要安全注意事项"]),
+            (["操作", "功能面板", "分配器", "SmartThings"], ["操作", "功能面板"]),
+            (["维护", "清洁", "附件"], ["维护", "清洁", "移动和维护附件"]),
+            (["故障排除", "异常声音", "不制冷"], ["故障排除", "异常声音"]),
+        ]
+
+        matched_keywords = None
+        for intent_keywords, section_keywords in intent_map:
+            if any(kw in query_lower for kw in intent_keywords):
+                matched_keywords = section_keywords
+                break
+
+        if not matched_keywords:
+            return extra_contexts
+
+        # 从检索到的节点中找出对应的源文件
+        for node in text_nodes:
+            metadata = node.node.metadata if hasattr(node.node, 'metadata') else {}
+            source_file = metadata.get("source_file", "")
+            if not source_file:
+                continue
+            doc_name = Path(source_file).stem
+            md_path = self.persist_dir / f"{doc_name}.md"
+            if md_path in processed_files:
+                continue
+            processed_files.add(md_path)
+
+            section_text = self._extract_markdown_section(md_path, matched_keywords)
+            if section_text:
+                extra_contexts.append(section_text)
+
+        return extra_contexts
+
     def query(self, query_text: str, similarity_threshold: float = 0.3) -> Dict[str, Any]:
         """
         执行查询
@@ -855,17 +951,17 @@ class UnifiedRAGSystem:
         if not self.index:
             raise RuntimeError("索引未初始化，请先构建或加载索引")
 
-        # 配置 LLM
-        llm = DashScope(model_name=self.llm_model, api_key=self.qwen_api_key)
+        # 配置 LLM（增大 max_tokens 以确保回答完整）
+        llm = DashScope(model_name=self.llm_model, api_key=self.qwen_api_key, max_tokens=4096)
 
         # 创建查询引擎
         query_engine = self.index.as_query_engine(
             llm=llm,
-            similarity_top_k=10,
+            similarity_top_k=20,
         )
 
         # 执行检索
-        retriever = self.index.as_retriever(similarity_top_k=10)
+        retriever = self.index.as_retriever(similarity_top_k=20)
         retrieved_nodes = retriever.retrieve(query_text)
 
         # 分类节点
@@ -922,26 +1018,56 @@ class UnifiedRAGSystem:
                 all_images.append(img_data)
                 seen_image_ids.add(image_id)
 
-        # 构建上下文
+        # 构建上下文：增加节点数量以覆盖更完整的信息
         context_parts = []
-        for node in text_nodes[:5]:
+        for node in text_nodes[:15]:
             if node.node.text:
                 context_parts.append(node.node.text)
 
-        for node in image_desc_nodes[:3]:
+        for node in image_desc_nodes[:5]:
             if node.node.text:
                 context_parts.append(f"[图片信息]\n{node.node.text}")
+
+        # 补充：从原始 Markdown 中提取完整章节，避免节点碎片化导致信息缺失
+        complete_sections = self._get_complete_section_context(query_text, text_nodes)
+        if complete_sections:
+            # 将完整章节放在最前面，确保 LLM 能看到连贯的内容
+            context_parts = ["[完整章节]\n\n" + "\n\n".join(complete_sections)] + context_parts
 
         # 生成回答
         if context_parts:
             context_text = "\n\n---\n\n".join(context_parts)
-            prompt = f"""基于以下参考信息回答问题：
 
+            # 构建图片信息用于提示
+            img_info_parts = []
+            for i, img_data in enumerate(all_images[:10], 1):
+                img_info = f"图片 {i}: ID={img_data['image_id']}"
+                if img_data.get("description"):
+                    img_info += f", 描述={img_data['description'][:150]}"
+                if img_data.get("keywords"):
+                    img_info += f", 关键词={', '.join(img_data['keywords'][:5])}"
+                img_info_parts.append(img_info)
+
+            img_context = "\n".join(img_info_parts) if img_info_parts else "无相关图片"
+
+            prompt = f"""你是一个专业的智能家居产品说明书助手。基于以下参考信息回答用户问题。
+
+【重要要求】
+1. 回答必须完整、详细，列出所有相关步骤和注意事项，不要遗漏任何内容。
+2. 如果内容包含多个步骤，请按顺序编号（1. 2. 3. ...）。
+3. 当某个步骤有相关图片时，请**立即在该步骤的文本后面**插入图片引用标记 `[图片: image_id]`，不要等全部说完再统一放图片。
+4. 如果一张图片对应多个步骤，请在最相关的那个步骤后面引用。
+5. 确保图片引用标记的 image_id 与下方【相关图片信息】中的 ID 完全一致。
+
+参考文本信息：
 {context_text}
+
+相关图片信息：
+{img_context}
 
 问题：{query_text}
 
-请给出详细、准确的回答："""
+请给出完整、详细、准确的回答，并在适当位置插入图片引用标记："""
 
             response = llm.complete(prompt)
             answer_text = response.text
