@@ -1,0 +1,14 @@
+{
+  "image_id": "Web_DA68-04852M-03_SBS_FSR_RS5000FC_UX_CN_img_002",
+  "description": "图片展示了冰箱控制面板在Wi-Fi开启和关闭两种状态下的显示界面。左侧为Wi-Fi开启状态，显示区域分为两部分：上方标有'Fridge'，下方标有'Freezer'，并显示温度为'0h'。右侧为Wi-Fi关闭状态，同样分为两部分：上方标有'Fridge'并显示数字'0'，下方标有'Freezer'并显示'FF'。两个界面均以虚线框划分区域，整体背景为白色，文字和边框为黑色，布局简洁清晰。",
+  "keywords": [
+    "冰箱",
+    "Wi-Fi",
+    "控制面板",
+    "温度显示",
+    "状态对比"
+  ],
+  "category": "示意图",
+  "ocr_text": "WI-Fi 开启\nFridge\nFreezer\n0h\nWi-Fi 关闭\nFridge\n0\nFreezer\nFF",
+  "confidence": 0.9
+}

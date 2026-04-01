@@ -742,7 +742,7 @@ class UnifiedRAGSystem:
         # 5. 保存索引来源哈希（用于下次校验）
         self._save_index_hashes(processed_docs)
 
-        # 6. 保存元数据
+        # 6. 保存元数据（确保包含完整的图片描述信息）
         metadata = {
             "documents": [
                 {
@@ -754,6 +754,8 @@ class UnifiedRAGSystem:
                 for doc in processed_docs
             ],
             "image_descriptions": {k: asdict(v) for k, v in self.image_descriptions.items()},
+            "total_images": len(self.images),
+            "total_descriptions": len(self.image_descriptions),
         }
 
         metadata_path = self.persist_dir / "document_metadata.json"
@@ -801,11 +803,33 @@ class UnifiedRAGSystem:
                         img_data["bbox"] = tuple(img_data["bbox"])
                         self.images.append(ImageInfo(**img_data))
 
-                # 恢复图片描述
-                self.image_descriptions = {
-                    k: ImageDescription(**v)
-                    for k, v in metadata.get("image_descriptions", {}).items()
-                }
+                # 恢复图片描述（加强错误处理和兼容性）
+                try:
+                    image_desc_data = metadata.get("image_descriptions", {})
+                    self.image_descriptions = {}
+                    for k, v in image_desc_data.items():
+                        try:
+                            if isinstance(v, dict):
+                                # 处理可能缺失的字段，提供默认值
+                                desc_data = {
+                                    "image_id": v.get("image_id", k),
+                                    "description": v.get("description", ""),
+                                    "category": v.get("category", "unknown"),
+                                    "keywords": v.get("keywords", []),
+                                    "confidence": float(v.get("confidence", 0.0)),
+                                    "ocr_text": v.get("ocr_text", ""),
+                                }
+                                self.image_descriptions[k] = ImageDescription(**desc_data)
+                        except Exception as inner_e:
+                            if self.verbose:
+                                print(f"  [警告] 恢复单个图片描述失败 {k}: {inner_e}")
+                    
+                    if self.verbose:
+                        print(f"  [元数据] 成功恢复 {len(self.image_descriptions)} 个图片描述")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [错误] 恢复图片描述时出错: {e}")
+                    self.image_descriptions = {}
 
             if self.verbose:
                 print(f"索引已加载: {self.persist_dir}")
